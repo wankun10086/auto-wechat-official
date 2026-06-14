@@ -16,7 +16,7 @@ from src.pipeline import ArticleGenerationPipeline
 from src.db.models import get_session, Article, LogLine
 from web.schemas import (
     GenerateRequest, GenerateResponse, TaskStatus,
-    ArticleItem, ArticleDetail, ModelInfo, PublishResponse,
+    ArticleItem, ArticleDetail, ModelInfo, PublishResponse, UploadRequest,
 )
 
 router = APIRouter(prefix="/api")
@@ -117,7 +117,7 @@ async def _run_generation_task_inner(task_id: str, req: GenerateRequest):
         tasks[task_id] = {"status": "running", "progress": 30, "message": "正在生成文章..."}
         result = await pipeline.run(
             source=req.url,
-            source_type="url",
+            source_type=req.source_type or "url",
             style=req.style,
             extra_prompt=req.prompt,
             screenshot_targets=req.screenshot.split(",") if req.screenshot else [],
@@ -157,6 +157,28 @@ async def _run_generation_task_inner(task_id: str, req: GenerateRequest):
     except Exception as e:
         logger.error(f"任务失败: {e}")
         tasks[task_id] = {"status": "failed", "progress": 0, "message": str(e)}
+
+
+@router.post("/upload")
+async def upload_source(body: UploadRequest):
+    """接收本地文件（base64），存到 data/uploads/，返回路径供 /generate 的 file 模式使用。"""
+    import base64
+    allowed = {".md", ".markdown", ".txt", ".html", ".htm"}
+    suffix = Path(body.name or "").suffix.lower()
+    if suffix not in allowed:
+        raise HTTPException(status_code=400, detail=f"仅支持 {', '.join(sorted(allowed))}")
+    try:
+        raw = base64.b64decode(body.content or "")
+    except Exception:
+        raise HTTPException(status_code=400, detail="文件内容解码失败")
+    if len(raw) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="文件过大（>5MB）")
+    upload_dir = Path("data/uploads")
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    dest = upload_dir / f"{uuid.uuid4().hex[:8]}-{body.name}"
+    dest.write_bytes(raw)
+    logger.info(f"上传源文件: {body.name} ({len(raw)} 字节)")
+    return {"path": str(dest), "name": body.name, "size": len(raw)}
 
 
 @router.post("/generate", response_model=GenerateResponse)

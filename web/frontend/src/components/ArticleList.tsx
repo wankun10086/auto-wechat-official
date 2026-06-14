@@ -62,8 +62,9 @@ export default function ArticleList({ onView, refreshKey }: Props) {
   if (articles.length === 0) {
     return (
       <div className="empty-state">
-        <div className="empty-icon">📝</div>
-        <div className="empty-text">暂无文章，生成你的第一篇吧</div>
+        <div className="empty-icon" />
+        <div className="empty-text">还没有文章</div>
+        <div className="empty-sub">去「生成」创建你的第一篇</div>
       </div>
     )
   }

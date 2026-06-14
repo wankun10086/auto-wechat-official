@@ -2,12 +2,19 @@ const BASE = ''
 
 export interface GenerateParams {
   url: string
+  source_type?: 'url' | 'file'
   model?: string
   style: string
   prompt: string
   screenshot: string
   no_images: boolean
   publish: boolean
+}
+
+export interface UploadResult {
+  path: string
+  name: string
+  size: number
 }
 
 export interface TaskStatus {
@@ -58,6 +65,29 @@ export async function generate(params: GenerateParams): Promise<{task_id: string
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(params),
   })
+  return res.json()
+}
+
+export async function uploadFile(file: File): Promise<UploadResult> {
+  const content = await new Promise<string>((resolve, reject) => {
+    const r = new FileReader()
+    r.onload = () => {
+      const s = r.result as string
+      const i = s.indexOf(',')
+      resolve(i >= 0 ? s.slice(i + 1) : s)
+    }
+    r.onerror = () => reject(new Error('读取文件失败'))
+    r.readAsDataURL(file)
+  })
+  const res = await fetch(`${BASE}/api/upload`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: file.name, content }),
+  })
+  if (!res.ok) {
+    const d = await res.json().catch(() => ({}))
+    throw new Error(d.detail || '上传失败')
+  }
   return res.json()
 }
 

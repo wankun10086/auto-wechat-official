@@ -57,9 +57,7 @@ export default function ArticlePreview({ article, onBack, onPublished }: Props) 
       </div>
 
       {article.digest && (
-        <div style={{ background: '#f9f9f9', padding: '12px 16px', borderRadius: 6, marginBottom: 16, fontSize: 14, color: '#666' }}>
-          {article.digest}
-        </div>
+        <div className="preview-digest">{article.digest}</div>
       )}
 
       <div
@@ -75,11 +73,11 @@ export default function ArticlePreview({ article, onBack, onPublished }: Props) 
             disabled={publishing}
           >
             {publishing && <span className="loading-spinner" />}
-            推送到微信
+            推送到草稿箱
           </button>
         )}
         {article.status === 'published' && (
-          <span style={{ fontSize: 14, color: '#07c160' }}>已发布到微信</span>
+          <span className="published-note">已发布到微信</span>
         )}
       </div>
     </div>

@@ -125,7 +125,7 @@ export default function App() {
                 {!taskId && !activeArticle && (
                   <div className="card">
                     <div className="empty-state">
-                      <div className="empty-icon">🗒️</div>
+                      <div className="empty-icon" />
                       <div className="empty-text">生成完成后，文章会在这里预览</div>
                     </div>
                   </div>

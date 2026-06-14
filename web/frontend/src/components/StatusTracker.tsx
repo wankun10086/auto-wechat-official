@@ -52,8 +52,8 @@ export default function StatusTracker({ taskId, onDone, onError }: Props) {
 
       <div className="progress-bar-container">
         <div
-          className="progress-bar"
-          style={{ width: `${isFailed ? 100 : progress}%`, background: isFailed ? '#f56c6c' : undefined }}
+          className={`progress-bar ${isFailed ? 'failed' : ''}`}
+          style={{ width: `${isFailed ? 100 : progress}%` }}
         />
       </div>
 
@@ -63,7 +63,7 @@ export default function StatusTracker({ taskId, onDone, onError }: Props) {
       </div>
 
       {isFailed && (
-        <div className="progress-message" style={{ color: '#f56c6c', marginTop: 8 }}>
+        <div className="progress-message failed-msg">
           生成失败: {message}
         </div>
       )}

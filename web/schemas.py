@@ -4,7 +4,8 @@ from datetime import datetime
 
 
 class GenerateRequest(BaseModel):
-    url: str
+    url: str                       # URL 或已上传文件的本地路径
+    source_type: str = "url"       # url | file
     model: Optional[str] = None
     style: str = "tech_explanation"
     prompt: str = ""
@@ -16,6 +17,11 @@ class GenerateRequest(BaseModel):
 class GenerateResponse(BaseModel):
     task_id: str
     status: str
+
+
+class UploadRequest(BaseModel):
+    name: str
+    content: str                   # base64 编码的文件内容
 
 
 class TaskStatus(BaseModel):
