@@ -1,0 +1,86 @@
+# Configuration template. Copy this file to config.yaml and fill in real values.
+# config.yaml holds secrets and is gitignored — never commit it.
+wechat:
+  app_id: "your-app-id"
+  app_secret: "your-app-secret"
+  author: "Your Name"
+  default_thumb_media_id: "your-thumb-media-id"
+
+ai:
+  provider: deepseek            # deepseek | kimi | minimax
+  deepseek:
+    api_key: "sk-your-deepseek-key"
+    base_url: https://api.deepseek.com
+    model: deepseek-chat
+  kimi:
+    api_key: ""
+    base_url: https://api.moonshot.cn/v1
+    model: moonshot-v1-8k
+  minimax:
+    api_key: "sk-your-minimax-key"
+    base_url: https://api.minimaxi.com/anthropic
+    model: MiniMax-M3
+    image_model: MiniMax-M3
+  temperature: 0.85
+  max_tokens: 4000
+
+content:
+  min_length: 1500
+  max_length: 2500
+  humanize_rounds: 4
+  banned_words:
+    - 赋能
+    - 抓手
+    - 底层逻辑
+    - 颗粒度
+    - 闭环
+    - 值得注意的是
+    - 需要指出的是
+    - 不可否认
+    - 综上所述
+    - 总的来说
+    - 众所周知
+    - 随着...的发展
+    - 在当今社会
+    - 首先
+    - 其次
+    - 最后
+
+schedule:
+  jobs:
+    - name: 工作日早间科技
+      cron: 0 8 * * 1,3,5
+      topic_strategy: hot_tech
+      enabled: true
+    - name: 周末深度长文
+      cron: 0 20 * * 0
+      topic_strategy: deep_analysis
+      enabled: true
+
+hot_topics:
+  sources:
+    - name: 36kr
+      url: https://36kr.com/hot-list/catalog
+      enabled: true
+    - name: v2ex
+      url: https://www.v2ex.com/?tab=hot
+      enabled: true
+    - name: hackernews
+      url: https://news.ycombinator.com/
+      enabled: true
+  fetch_count: 10
+
+browser:
+  headless: false
+  cookie_path: data/wechat_cookies.json
+  min_delay: 1.0
+  max_delay: 3.0
+  screenshot_path: data/screenshots/
+
+database:
+  path: data/articles.db
+
+logging:
+  level: INFO
+  file: data/app.log
+  rotation: 10 MB

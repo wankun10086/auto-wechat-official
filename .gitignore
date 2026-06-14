@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Data & Runtime
+data/
+*.db
+*.log
+
+# Config with secrets (real config.yaml is local-only; track the example template)
+config/config.yaml
+
+# Node / Frontend build
+web/frontend/node_modules/
+web/frontend/dist/
+
+# Browser
+wechat_cookies.json
+screenshots/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

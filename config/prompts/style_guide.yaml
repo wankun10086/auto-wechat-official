@@ -1,0 +1,98 @@
+# 文章风格指南
+
+# 排版模板
+templates:
+  # 科技解读类
+  tech_explanation:
+    hook_types:
+      - "反直觉：你知道{技术}最大的谎言是什么吗？"
+      - "故事开头：上周我遇到一个离谱的bug..."
+      - "数据冲击：{数据}%的程序员都不知道这件事"
+      - "争议观点：我觉得{主流观点}是错的"
+    structure: "钩子→误解→真相→故事→启示→开放结尾"
+    section_count: 5-7
+    paragraph_length: "混合，有的长有的短"
+
+  # 产品测评类
+  product_review:
+    hook_types:
+      - "体验反转：用了{产品}一周，我后悔了。"
+      - "对比冲突：{产品A} vs {产品B}，结果出乎意料"
+      - "省钱警告：别买{产品}，除非你看完这篇"
+    structure: "期待→落差→发现→细节→结论→建议"
+    section_count: 6-8
+    paragraph_length: "短为主，配合图片说明"
+
+  # 行业分析类
+  industry_analysis:
+    hook_types:
+      - "内幕揭示：{公司}不会告诉你的一个秘密"
+      - "趋势预判：{行业}正在发生一件大事"
+      - "反共识：大家都看好{事物}，但我有不同看法"
+    structure: "现象→内幕→分析→案例→预测→观点"
+    section_count: 6-9
+    paragraph_length: "中等，逻辑清晰"
+
+  # 教程/干货类
+  tutorial:
+    hook_types:
+      - "痛点共鸣：你是不是也被{问题}折磨过？"
+      - "效率对比：从3小时到10分钟，我只做了一件事"
+      - "避坑指南：{技术}入门，这5个坑千万别踩"
+    structure: "痛点→方案→步骤→注意→效果→扩展"
+    section_count: 7-10
+    paragraph_length: "短，配合代码块"
+
+# 文章HTML样式
+html_style: |
+  <style>
+    .article-content {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      line-height: 1.8;
+      color: #333;
+      font-size: 16px;
+    }
+    .article-content h2 {
+      font-size: 20px;
+      font-weight: bold;
+      margin: 30px 0 15px;
+      color: #1a1a1a;
+      border-left: 4px solid #07c160;
+      padding-left: 12px;
+    }
+    .article-content h3 {
+      font-size: 18px;
+      font-weight: bold;
+      margin: 25px 0 10px;
+      color: #333;
+    }
+    .article-content p {
+      margin: 12px 0;
+    }
+    .article-content blockquote {
+      background: #f7f7f7;
+      border-left: 4px solid #ddd;
+      padding: 12px 16px;
+      margin: 15px 0;
+      color: #666;
+      font-style: italic;
+    }
+    .article-content strong {
+      color: #07c160;
+      font-weight: bold;
+    }
+    .article-content ul, .article-content ol {
+      padding-left: 20px;
+      margin: 10px 0;
+    }
+    .article-content li {
+      margin: 5px 0;
+    }
+    .article-content code {
+      background: #f0f0f0;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-size: 14px;
+      color: #e74c3c;
+    }
+  </style>
