@@ -32,3 +32,10 @@ screenshots/
 # OS
 .DS_Store
 Thumbs.db
+
+# Agent tooling & planning (local-only; not project code)
+.agents/
+.agent-team/
+.claude/settings.local.json
+skills-lock.json
+data/uploads/
