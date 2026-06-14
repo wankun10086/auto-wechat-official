@@ -36,6 +36,6 @@ Thumbs.db
 # Agent tooling & planning (local-only; not project code)
 .agents/
 .agent-team/
-.claude/settings.local.json
+.claude/
 skills-lock.json
 data/uploads/
