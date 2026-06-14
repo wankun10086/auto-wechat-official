@@ -5,12 +5,15 @@ import sys
 import threading
 from collections import deque
 from datetime import datetime
+from pathlib import Path
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from fastapi.responses import StreamingResponse
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 from loguru import logger
 from src.config import Config
 from src.pipeline import ArticleGenerationPipeline
-from src.db.models import get_session, Article
+from src.db.models import get_session, Article, LogLine
 from web.schemas import (
     GenerateRequest, GenerateResponse, TaskStatus,
     ArticleItem, ArticleDetail, ModelInfo, PublishResponse,
@@ -22,10 +25,39 @@ log_buffer = deque(maxlen=500)
 log_lock = threading.Lock()
 log_event = threading.Event()
 
+# 持久化日志引擎（懒加载，复用 articles.db，独立于 get_session 的每次重建）
+_log_engine = None
+_LogSession = None
+
+
+def _get_log_session():
+    global _log_engine, _LogSession
+    if _log_engine is None:
+        db_path = Config().get("database", "path", default="data/articles.db") or "data/articles.db"
+        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+        _log_engine = create_engine(
+            f"sqlite:///{db_path}", connect_args={"check_same_thread": False}
+        )
+        LogLine.__table__.create(_log_engine, checkfirst=True)
+        _LogSession = sessionmaker(bind=_log_engine)
+    return _LogSession()
+
 
 def _broadcast(entry: dict):
     with log_lock:
         log_buffer.append(entry)
+    # 同步落库，保证 Web UI 可回滚查看（重启不丢失）
+    try:
+        session = _get_log_session()
+        session.add(LogLine(
+            level=entry.get("level", "INFO"),
+            message=entry.get("message", ""),
+            module=entry.get("module", ""),
+        ))
+        session.commit()
+        session.close()
+    except Exception:
+        pass
     log_event.set()
 
 
@@ -324,8 +356,23 @@ async def update_settings(body: dict):
 
 @router.get("/logs")
 async def get_logs():
-    with log_lock:
-        return list(log_buffer)
+    # 读取持久化历史（重启后仍可回滚查看），失败时回退到内存缓冲
+    try:
+        session = _get_log_session()
+        rows = session.query(LogLine).order_by(LogLine.id.desc()).limit(500).all()
+        session.close()
+        return [
+            {
+                "time": r.created_at.strftime("%H:%M:%S") if r.created_at else "",
+                "level": r.level or "INFO",
+                "message": r.message or "",
+                "module": r.module or "",
+            }
+            for r in reversed(rows)
+        ]
+    except Exception:
+        with log_lock:
+            return list(log_buffer)
 
 
 @router.get("/logs/stream")

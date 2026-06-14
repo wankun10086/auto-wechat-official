@@ -35,11 +35,13 @@ def get_provider(name: str = None) -> BaseProvider:
     from src.ai.deepseek import DeepSeekProvider
     from src.ai.kimi import KimiProvider
     from src.ai.minimax import MiniMaxProvider
+    from src.ai.mock import MockProvider
 
     providers = {
         "deepseek": DeepSeekProvider,
         "kimi": KimiProvider,
         "minimax": MiniMaxProvider,
+        "mock": MockProvider,
     }
 
     cls = providers.get(provider_name)

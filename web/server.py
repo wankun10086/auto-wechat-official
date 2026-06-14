@@ -1,5 +1,14 @@
+import os
 import sys
 from pathlib import Path
+
+# pythonw.exe（无窗口后台启动器）会把 stdout/stderr 置为 None。
+# loguru 的 stderr sink 与我们的 LogIntercept 都需要真实流，这里重定向到 devnull。
+if sys.stdout is None:
+    sys.stdout = open(os.devnull, "w", encoding="utf-8")
+if sys.stderr is None:
+    sys.stderr = open(os.devnull, "w", encoding="utf-8")
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -47,7 +56,15 @@ def main():
     config.load()
     setup_logging(config)
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8000
-    uvicorn.run("web.server:app", host="0.0.0.0", port=port, reload=True)
+    background = os.environ.get("AUTOWECHAT_BACKGROUND") == "1"
+    if background:
+        # 无窗口模式：写 PID 便于停止；关闭 reload（reload 会再开子进程）
+        try:
+            Path("data").mkdir(parents=True, exist_ok=True)
+            (Path("data") / "server.pid").write_text(str(os.getpid()), encoding="utf-8")
+        except Exception:
+            pass
+    uvicorn.run("web.server:app", host="0.0.0.0", port=port, reload=not background)
 
 
 if __name__ == "__main__":

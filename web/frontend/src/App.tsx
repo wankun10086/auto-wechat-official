@@ -8,17 +8,22 @@ import LogPanel from './components/LogPanel'
 import { getModels, getArticle } from './api'
 import type { ModelInfo, ArticleDetail } from './api'
 
-type Page = 'home' | 'settings'
+type Nav = 'generate' | 'articles' | 'settings'
 type ToastItem = { id: number; type: 'success' | 'error' | 'info'; text: string }
+
+const NAV_META: Record<Nav, { title: string; sub: string; ico: string; label: string }> = {
+  generate: { title: '生成文章', sub: '从 GitHub 仓库、文章链接或本地文件生成', ico: '✎', label: '生成' },
+  articles: { title: '文章', sub: '查看与管理已生成的文章', ico: '☰', label: '文章' },
+  settings: { title: '设置', sub: '模型、公众号与内容参数', ico: '⚙', label: '设置' },
+}
 
 export default function App() {
   const [models, setModels] = useState<ModelInfo[]>([])
+  const [nav, setNav] = useState<Nav>('generate')
   const [taskId, setTaskId] = useState<string | null>(null)
   const [activeArticle, setActiveArticle] = useState<ArticleDetail | null>(null)
-  const [rightTab, setRightTab] = useState<'preview' | 'list'>('list')
-  const [toasts, setToasts] = useState<ToastItem[]>([])
   const [refreshKey, setRefreshKey] = useState(0)
-  const [page, setPage] = useState<Page>('home')
+  const [toasts, setToasts] = useState<ToastItem[]>([])
 
   useEffect(() => {
     getModels().then(setModels).catch(() => {})
@@ -27,13 +32,13 @@ export default function App() {
   const addToast = (type: ToastItem['type'], text: string) => {
     const id = Date.now()
     setToasts(prev => [...prev, { id, type, text }])
-    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3000)
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3200)
   }
 
   const handleGenerated = (tid: string) => {
     setTaskId(tid)
-    setRightTab('preview')
     setActiveArticle(null)
+    setNav('generate')
   }
 
   const handleTaskDone = (articleId: number) => {
@@ -44,115 +49,125 @@ export default function App() {
     }).catch(() => addToast('error', '加载文章失败'))
   }
 
-  const handleViewArticle = (article: ArticleDetail) => {
-    setActiveArticle(article)
-    setRightTab('preview')
-  }
-
-  const handleBack = () => {
-    setActiveArticle(null)
-    setRightTab('list')
-  }
-
   const handlePublished = () => {
     addToast('success', '发布成功')
     setRefreshKey(k => k + 1)
   }
 
-  const handleSettingsSaved = () => {
-    addToast('success', '配置已保存')
-    getModels().then(setModels).catch(() => {})
-  }
+  const availableModels = models.filter(m => m.has_key).length
 
   return (
-    <div className="app-container">
-      <header className="header">
-        <h1>
-          Auto WeChat
-          <span>公众号自动化发布</span>
-        </h1>
-        <div className="header-right">
-          {models.length > 0 && (
-            <span style={{ fontSize: 13, color: '#999' }}>
-              {models.filter(m => m.has_key).length} 个模型可用
-            </span>
-          )}
-          <button
-            className={`header-btn ${page === 'settings' ? 'active' : ''}`}
-            onClick={() => setPage(page === 'settings' ? 'home' : 'settings')}
-          >
-            {page === 'settings' ? '✕ 关闭' : '⚙ 设置'}
-          </button>
-        </div>
-      </header>
-
-      {page === 'settings' ? (
-        <Settings
-          onBack={() => setPage('home')}
-          onSaved={handleSettingsSaved}
-          onError={msg => addToast('error', msg)}
-        />
-      ) : (
-        <div className="main-content">
-          <div className="panel-left">
-            <GenerateForm
-              models={models}
-              onGenerated={handleGenerated}
-              onError={msg => addToast('error', msg)}
-            />
+    <div className="app-shell">
+      <aside className="sidebar">
+        <div className="sidebar-brand">
+          <div className="brand-mark">A</div>
+          <div className="brand-text">
+            <span className="brand-title">Auto WeChat</span>
+            <span className="brand-sub">公众号自动化</span>
           </div>
+        </div>
 
-          <div className="panel-right">
-            {taskId && !activeArticle && (
-              <StatusTracker
-                taskId={taskId}
-                onDone={handleTaskDone}
+        <nav className="nav">
+          {(Object.keys(NAV_META) as Nav[]).map(n => (
+            <button
+              key={n}
+              className={`nav-item ${nav === n ? 'active' : ''}`}
+              onClick={() => setNav(n)}
+            >
+              <span className="nav-ico">{NAV_META[n].ico}</span>
+              {NAV_META[n].label}
+            </button>
+          ))}
+        </nav>
+
+        <div className="sidebar-footer">
+          <span>
+            <span className={`dot ${availableModels > 0 ? '' : 'off'}`} />
+            {availableModels} 个模型可用
+          </span>
+          <span>本地服务 · 仅草稿</span>
+        </div>
+      </aside>
+
+      <main className="main">
+        <header className="topbar">
+          <div>
+            <div className="topbar-title">{NAV_META[nav].title}</div>
+            <div className="topbar-sub">{NAV_META[nav].sub}</div>
+          </div>
+        </header>
+
+        <div className="content">
+          {nav === 'generate' && (
+            <div className="split">
+              <GenerateForm
+                models={models}
+                onGenerated={handleGenerated}
                 onError={msg => addToast('error', msg)}
               />
-            )}
-
-            <div className="card">
-              <div className="tab-bar">
-                <button
-                  className={`tab-item ${rightTab === 'list' ? 'active' : ''}`}
-                  onClick={() => { setRightTab('list'); setActiveArticle(null) }}
-                >
-                  文章列表
-                </button>
-                <button
-                  className={`tab-item ${rightTab === 'preview' ? 'active' : ''}`}
-                  onClick={() => setRightTab('preview')}
-                  disabled={!activeArticle}
-                >
-                  文章预览
-                </button>
+              <div>
+                {taskId && (
+                  <StatusTracker
+                    taskId={taskId}
+                    onDone={handleTaskDone}
+                    onError={msg => addToast('error', msg)}
+                  />
+                )}
+                {!taskId && activeArticle && (
+                  <div className="card">
+                    <ArticlePreview
+                      article={activeArticle}
+                      onBack={() => setActiveArticle(null)}
+                      onPublished={handlePublished}
+                    />
+                  </div>
+                )}
+                {!taskId && !activeArticle && (
+                  <div className="card">
+                    <div className="empty-state">
+                      <div className="empty-icon">🗒️</div>
+                      <div className="empty-text">生成完成后，文章会在这里预览</div>
+                    </div>
+                  </div>
+                )}
               </div>
+            </div>
+          )}
 
-              {rightTab === 'preview' && activeArticle ? (
+          {nav === 'articles' && (
+            activeArticle ? (
+              <div className="card">
                 <ArticlePreview
                   article={activeArticle}
-                  onBack={handleBack}
+                  onBack={() => setActiveArticle(null)}
                   onPublished={handlePublished}
                 />
-              ) : rightTab === 'preview' && !activeArticle ? (
-                <div className="empty-state">
-                  <div className="empty-icon">📄</div>
-                  <div className="empty-text">选择一篇文章进行预览</div>
+              </div>
+            ) : (
+              <div className="card">
+                <div className="card-title">
+                  文章列表
+                  <span className="sub">最近 50 篇</span>
                 </div>
-              ) : null}
+                <ArticleList onView={a => setActiveArticle(a)} refreshKey={refreshKey} />
+              </div>
+            )
+          )}
 
-              {rightTab === 'list' && (
-                <ArticleList
-                  onView={handleViewArticle}
-                  refreshKey={refreshKey}
-                />
-              )}
-            </div>
-          </div>
+          {nav === 'settings' && (
+            <Settings
+              onBack={() => setNav('generate')}
+              onSaved={() => {
+                addToast('success', '配置已保存')
+                getModels().then(setModels).catch(() => {})
+              }}
+              onError={msg => addToast('error', msg)}
+            />
+          )}
         </div>
-      )}
 
-      {page === 'home' && <LogPanel />}
+        <LogPanel />
+      </main>
 
       <div className="toast-container">
         {toasts.map(t => (

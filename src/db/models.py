@@ -85,6 +85,17 @@ class PublishLog(Base):
     created_at = Column(DateTime, default=datetime.now)
 
 
+class LogLine(Base):
+    """持久化的运行日志，供 Web UI 回滚查看（重启不丢失）。"""
+    __tablename__ = "log_lines"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    created_at = Column(DateTime, default=datetime.now)
+    level = Column(String(20), default="INFO")
+    message = Column(Text)
+    module = Column(String(50), default="")
+
+
 def init_db(db_path="data/articles.db"):
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     engine = create_engine(f"sqlite:///{db_path}", echo=False)
@@ -93,6 +104,14 @@ def init_db(db_path="data/articles.db"):
     return engine, Session
 
 
-def get_session(db_path="data/articles.db"):
+def get_session(db_path=None):
+    """返回一个 Session。
+
+    db_path 留空时走配置里的 database.path，确保 web/pipeline/tests 三方
+    始终指向同一个库（测试时 conftest 只改这一处即可完全隔离）。
+    """
+    if db_path is None:
+        from src.config import Config
+        db_path = Config().get("database", "path", default="data/articles.db")
     engine, Session = init_db(db_path)
     return Session()
