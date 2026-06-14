@@ -78,4 +78,23 @@ These bias toward caution over speed; use judgment for trivial tasks.
 
 ## GitHub workflow
 
-On each session start, sync local work to GitHub: stage tracked changes, commit with a clear message, and push to the configured remote. Never commit secrets — `config/config.yaml` and `data/` are gitignored; `config/config.example.yaml` is the tracked template.
+**Commit then push as one atomic action.** After any meaningful change, commit it and push to `origin/main` directly — no separate confirmation needed. The remote and credentials are already configured (HTTPS, Git Credential Manager caches credentials, `http.sslBackend=openssl`).
+
+**Commit action:**
+
+1. `git add` only the files relevant to the task (don't blindly `git add -A`, to avoid sweeping in local artifacts).
+2. Commit with a conventional message (see below).
+3. `git push` to `origin/main` immediately — this is the default, triggered right after every commit.
+
+**Commit message convention** — Conventional Commits, short imperative subject line, Chinese or English:
+
+- `feat: <new capability>` — e.g. `feat: mock provider, persistent logs, test suite, UI refactor, background launch`
+- `fix: <bug fix>`
+- `docs: <docs only>`
+- `refactor: <refactor>`
+- `test: <tests>`
+- `chore: <deps/build/misc>`
+
+Multiple unrelated changes go as separate commits; an optional body separated by a blank line lists bullet-point details.
+
+**Never commit secrets.** `config/config.yaml` and `data/` are gitignored; the tracked template is `config/config.example.yaml`. Local-only tooling/config that must NOT be committed: `.agents/` (installed skills), `.claude/settings.local.json` (machine-local permissions), `skills-lock.json`.
