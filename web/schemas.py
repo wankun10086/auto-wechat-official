@@ -8,6 +8,7 @@ class GenerateRequest(BaseModel):
     topic: str = ""
     source_type: Literal["url", "file", "topic"] = "url"
     model: Optional[str] = None
+    image_model: Optional[str] = None
     style: str = "tech_explanation"
     prompt: str = ""
     screenshot: str = ""

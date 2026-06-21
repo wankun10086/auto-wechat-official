@@ -168,7 +168,7 @@ def test_generate_task_reports_pipeline_last_error(monkeypatch):
     from web import api as webapi
 
     class FakePipeline:
-        def __init__(self, model=None):
+        def __init__(self, model=None, image_model=None):
             self.last_error = ""
 
         async def run(self, **kwargs):
@@ -195,7 +195,7 @@ def test_generate_task_reports_pipeline_warnings(monkeypatch):
     from web import api as webapi
 
     class FakePipeline:
-        def __init__(self, model=None):
+        def __init__(self, model=None, image_model=None):
             self.last_error = ""
 
         async def run(self, **kwargs):
@@ -223,6 +223,48 @@ def test_generate_task_reports_pipeline_warnings(monkeypatch):
     assert status["status"] == "done"
     assert "文章生成完成" in status["message"]
     assert "image quota exhausted" in status["message"]
+
+
+def test_generate_task_passes_image_model(monkeypatch):
+    from web import api as webapi
+
+    captured = {}
+
+    class FakePipeline:
+        def __init__(self, model=None, image_model=None):
+            captured["model"] = model
+            captured["image_model"] = image_model
+            self.last_error = ""
+
+        async def run(self, **kwargs):
+            captured["run"] = kwargs
+            return {
+                "id": 100,
+                "title": "demo",
+                "content": "<p>demo</p>",
+                "digest": "demo",
+                "ai_score": 0.1,
+                "warnings": [],
+            }
+
+    monkeypatch.setattr(webapi, "ArticleGenerationPipeline", FakePipeline)
+
+    r = client.post("/api/generate", json={
+        "source_type": "topic",
+        "topic": "AI Agent 产品趋势",
+        "model": "deepseek",
+        "image_model": "glm",
+        "style": "tech_explanation",
+        "publish": False,
+    })
+    assert r.status_code == 200
+    task_id = r.json()["task_id"]
+    status = client.get(f"/api/tasks/{task_id}").json()
+
+    assert status["status"] == "done"
+    assert captured["model"] == "deepseek"
+    assert captured["image_model"] == "glm"
+    assert captured["run"]["generate_images"] is True
 
 
 def test_article_detail_sanitizes_preview_html():

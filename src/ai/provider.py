@@ -26,10 +26,13 @@ class BaseProvider(ABC):
         pass
 
 
+IMAGE_PROVIDER_NAMES = ["minimax", "glm"]
+
+
 def get_provider(name: str = None) -> BaseProvider:
     config = Config()
     ai_config = config.ai
-    provider_name = name or ai_config.get("provider", "deepseek")
+    provider_name = resolve_provider_name(name)
     provider_config = ai_config.get(provider_name, {})
 
     from src.ai.deepseek import DeepSeekProvider
@@ -58,13 +61,49 @@ def get_provider(name: str = None) -> BaseProvider:
 def _validate_provider_config(provider_name: str, provider_config: dict) -> None:
     if provider_name == "mock":
         return
-    required = ["api_key", "base_url", "model"]
-    missing = [key for key in required if not provider_config.get(key)]
+    missing = provider_config_missing(provider_name, provider_config)
     if missing:
         raise ValueError(
             f"{provider_name} 配置缺失: {', '.join(missing)}。"
             "请在 config/config.yaml 或 Web 设置中填写后再使用。"
         )
+
+
+def resolve_provider_name(name: str = None) -> str:
+    return (name or Config().ai.get("provider", "deepseek") or "deepseek").strip().lower()
+
+
+def resolve_image_provider_name(name: str = None, text_provider: str = None) -> str:
+    config = Config()
+    ai_config = config.ai
+    provider = (text_provider or resolve_provider_name()).strip().lower()
+    requested = name if name is not None else ai_config.get("image_provider", "")
+    requested = (requested or "").strip().lower()
+
+    if requested == "none":
+        return ""
+    if requested and requested != "auto":
+        return requested
+    if provider_supports_image(provider):
+        return provider
+
+    for candidate in IMAGE_PROVIDER_NAMES:
+        if not provider_config_missing(candidate, ai_config.get(candidate, {}), require_image=True):
+            return candidate
+    return ""
+
+
+def provider_config_missing(provider_name: str, provider_config: dict = None, require_image: bool = False) -> list[str]:
+    if provider_name == "mock":
+        return []
+
+    config = Config()
+    provider_config = provider_config if provider_config is not None else config.ai.get(provider_name, {})
+    required = ["api_key", "base_url", "model"]
+    missing = [key for key in required if not provider_config.get(key)]
+    if require_image and provider_name in {"minimax", "glm"} and not provider_config.get("image_model"):
+        missing.append("image_model")
+    return missing
 
 
 def list_provider_names(include_mock: bool = False) -> list:

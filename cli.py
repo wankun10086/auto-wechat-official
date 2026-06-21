@@ -44,6 +44,7 @@ def build_parser():
     url_parser.add_argument("--screenshot", default="",
                             help="截图目标，逗号分隔: code,charts,tables,images,all（默认不截图）")
     url_parser.add_argument("--no-images", action="store_true", help="不生成AI配图")
+    url_parser.add_argument("--image-model", choices=AI_MODELS, help="指定AI配图模型（默认自动选择MiniMax/GLM）")
     url_parser.add_argument("--publish", action="store_true", help="生成后直接创建草稿")
     url_parser.add_argument("--output", "-o", help="输出文章HTML到文件")
 
@@ -57,6 +58,7 @@ def build_parser():
     file_parser.add_argument("--prompt", "-p", default="", help="额外的写作指令")
     file_parser.add_argument("--screenshot", default="", help="截图目标（仅对URL有效，文件模式忽略）")
     file_parser.add_argument("--no-images", action="store_true", help="不生成AI配图")
+    file_parser.add_argument("--image-model", choices=AI_MODELS, help="指定AI配图模型（默认自动选择MiniMax/GLM）")
     file_parser.add_argument("--publish", action="store_true", help="生成后直接创建草稿")
     file_parser.add_argument("--output", "-o", help="输出文章HTML到文件")
 
@@ -68,6 +70,7 @@ def build_parser():
                               help="文章风格")
     topic_parser.add_argument("--prompt", "-p", default="", help="额外的写作指令")
     topic_parser.add_argument("--no-images", action="store_true", help="不生成或嵌入配图")
+    topic_parser.add_argument("--image-model", choices=AI_MODELS, help="指定AI配图模型（默认自动选择MiniMax/GLM）")
     topic_parser.add_argument("--publish", action="store_true", help="生成后直接创建微信草稿")
     topic_parser.add_argument("--output", "-o", help="输出文章HTML到文件")
 
@@ -88,6 +91,7 @@ def build_parser():
 
     doctor_parser = subparsers.add_parser("doctor", help="检查模型、检索和微信草稿配置")
     doctor_parser.add_argument("--model", "-m", choices=AI_MODELS, help="指定要检查的模型")
+    doctor_parser.add_argument("--image-model", choices=AI_MODELS, help="指定要检查的AI配图模型")
     doctor_parser.add_argument("--publish", action="store_true", help="同时检查微信草稿发布前置项")
 
     return parser
@@ -96,10 +100,10 @@ def build_parser():
 async def cmd_from_url(args):
     from src.pipeline import ArticleGenerationPipeline
 
-    if args.publish and not _ensure_ready_for_publish(args.model):
+    if args.publish and not _ensure_ready_for_publish(args.model, args.image_model, not args.no_images):
         return
 
-    pipeline = ArticleGenerationPipeline(model=args.model)
+    pipeline = ArticleGenerationPipeline(model=args.model, image_model=args.image_model)
     result = await pipeline.run(
         source=args.url,
         source_type="url",
@@ -139,10 +143,10 @@ async def cmd_from_file(args):
         print(f"文件不存在: {args.file}")
         return
 
-    if args.publish and not _ensure_ready_for_publish(args.model):
+    if args.publish and not _ensure_ready_for_publish(args.model, args.image_model, not args.no_images):
         return
 
-    pipeline = ArticleGenerationPipeline(model=args.model)
+    pipeline = ArticleGenerationPipeline(model=args.model, image_model=args.image_model)
     result = await pipeline.run(
         source=args.file,
         source_type="file",
@@ -176,10 +180,10 @@ async def cmd_from_file(args):
 async def cmd_from_topic(args):
     from src.pipeline import ArticleGenerationPipeline
 
-    if args.publish and not _ensure_ready_for_publish(args.model):
+    if args.publish and not _ensure_ready_for_publish(args.model, args.image_model, not args.no_images):
         return
 
-    pipeline = ArticleGenerationPipeline(model=args.model)
+    pipeline = ArticleGenerationPipeline(model=args.model, image_model=args.image_model)
     result = await pipeline.run(
         source=args.topic,
         source_type="topic",
@@ -198,6 +202,8 @@ async def cmd_from_topic(args):
     print(f"  AI味得分: {result['ai_score']:.2f}")
     print(f"  素材配图: {len(result.get('material_images', []))}")
     print(f"  AI配图: {len(result.get('ai_images', []))}")
+    if result.get("image_provider"):
+        print(f"  AI配图模型: {result['image_provider']}")
     if result.get("research_query"):
         print(f"  检索词: {result['research_query']}")
     _print_sources(result)
@@ -309,7 +315,7 @@ def cmd_models():
 def cmd_doctor(args) -> int:
     from src.readiness import collect_readiness, readiness_ok
 
-    checks = collect_readiness(model=args.model, publish=args.publish)
+    checks = collect_readiness(model=args.model, image_model=args.image_model, publish=args.publish)
     print("\n配置检查:\n")
     icons = {"error": "[ERR]", "warning": "[WARN]", "info": "[OK]"}
     for item in checks:
@@ -325,10 +331,15 @@ def cmd_doctor(args) -> int:
     return 0 if ok else 1
 
 
-def _ensure_ready_for_publish(model: str | None) -> bool:
+def _ensure_ready_for_publish(model: str | None, image_model: str | None, generate_images: bool) -> bool:
     from src.readiness import collect_readiness, readiness_ok
 
-    checks = collect_readiness(model=model, publish=True)
+    checks = collect_readiness(
+        model=model,
+        image_model=image_model,
+        publish=True,
+        generate_images=generate_images,
+    )
     if readiness_ok(checks):
         return True
 

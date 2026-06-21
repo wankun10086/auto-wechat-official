@@ -34,6 +34,7 @@ export default function GenerateForm({ models, onGenerated, onError }: Props) {
   const [dragging, setDragging] = useState(false)
 
   const [selectedModel, setSelectedModel] = useState('')
+  const [selectedImageModel, setSelectedImageModel] = useState('')
   const [style, setStyle] = useState('tech_explanation')
   const [prompt, setPrompt] = useState('')
   const [screenshot, setScreenshot] = useState('')
@@ -42,6 +43,7 @@ export default function GenerateForm({ models, onGenerated, onError }: Props) {
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const selectedModelInfo = models.find(m => m.name === selectedModel) || models.find(m => m.is_current)
+  const imageModels = models.filter(m => m.supports_image && m.is_ready)
 
   const handleScreenshotToggle = (val: string) => {
     setScreenshot(prev => {
@@ -83,6 +85,7 @@ export default function GenerateForm({ models, onGenerated, onError }: Props) {
         topic: topic.trim(),
         source_type: sourceType,
         model: selectedModel || undefined,
+        image_model: selectedImageModel || undefined,
         style,
         prompt: prompt.trim(),
         screenshot: sourceType === 'url' ? screenshot : '',
@@ -228,6 +231,30 @@ export default function GenerateForm({ models, onGenerated, onError }: Props) {
         </select>
       </div>
 
+      <div className="form-group">
+        <label>AI配图模型</label>
+        <select
+          className="select"
+          value={selectedImageModel}
+          onChange={e => setSelectedImageModel(e.target.value)}
+          disabled={noImages}
+        >
+          <option value="">自动选择</option>
+          {imageModels.map(m => (
+            <option key={m.name} value={m.name}>{m.name}</option>
+          ))}
+        </select>
+        {!noImages && (
+          <div className="field-hint">
+            {selectedImageModel
+              ? `AI配图将使用 ${selectedImageModel}。`
+              : selectedModelInfo?.supports_image
+                ? '自动复用当前文本模型生成AI配图。'
+                : '自动使用已配置的 MiniMax/GLM；没有可用图片模型时会保留素材图并跳过AI配图。'}
+          </div>
+        )}
+      </div>
+
       {sourceType === 'url' && (
         <div className="form-group">
           <label>截图选项</label>
@@ -262,8 +289,8 @@ export default function GenerateForm({ models, onGenerated, onError }: Props) {
           <input type="checkbox" checked={noImages} onChange={e => setNoImages(e.target.checked)} />
           不包含图片
         </label>
-        {!noImages && selectedModelInfo && !selectedModelInfo.supports_image && (
-          <div className="field-hint">当前模型只生成正文；素材图片仍会检索，AI配图请选 MiniMax 或 GLM。</div>
+        {!noImages && selectedModelInfo && !selectedModelInfo.supports_image && !selectedImageModel && (
+          <div className="field-hint">当前文本模型不会生成图片；系统会尝试调用可用的独立AI配图模型。</div>
         )}
       </div>
 

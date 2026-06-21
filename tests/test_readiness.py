@@ -70,3 +70,29 @@ def test_publish_only_readiness_skips_model_config():
 
     assert readiness_ok(checks) is True
     assert {c.name for c in checks} == {"wechat", "cover"}
+
+
+def test_readiness_uses_configured_image_provider_for_text_model():
+    cfg = Config()
+    old_ai = cfg._data.get("ai", {}).copy()
+    cfg._data["ai"] = {
+        "provider": "deepseek",
+        "deepseek": {
+            "api_key": "deepseek-key",
+            "base_url": "https://deepseek.example",
+            "model": "deepseek-chat",
+        },
+        "glm": {
+            "api_key": "glm-key",
+            "base_url": "https://glm.example",
+            "model": "glm-4",
+            "image_model": "glm-image",
+        },
+    }
+    try:
+        checks = collect_readiness(model="deepseek", publish=False)
+    finally:
+        cfg._data["ai"] = old_ai
+
+    assert readiness_ok(checks) is True
+    assert any(c.name == "image_config" and "glm" in c.message for c in checks)

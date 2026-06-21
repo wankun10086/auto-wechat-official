@@ -8,6 +8,7 @@ wechat:
 
 ai:
   provider: deepseek            # deepseek | kimi | minimax | glm
+  image_provider: ""            # optional: auto-detect, or set minimax | glm
   deepseek:
     api_key: "sk-your-deepseek-key"
     base_url: https://api.deepseek.com

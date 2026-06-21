@@ -128,7 +128,12 @@ async def _run_generation_task_inner(task_id: str, req: GenerateRequest):
     tasks[task_id] = {"status": "running", "progress": 10, "message": "正在抓取内容..."}
     try:
         if req.publish:
-            checks = collect_readiness(model=req.model, publish=True)
+            checks = collect_readiness(
+                model=req.model,
+                image_model=req.image_model,
+                publish=True,
+                generate_images=not req.no_images,
+            )
             if not readiness_ok(checks):
                 tasks[task_id] = {
                     "status": "failed",
@@ -137,7 +142,7 @@ async def _run_generation_task_inner(task_id: str, req: GenerateRequest):
                 }
                 return
 
-        pipeline = ArticleGenerationPipeline(model=req.model)
+        pipeline = ArticleGenerationPipeline(model=req.model, image_model=req.image_model)
         tasks[task_id] = {"status": "running", "progress": 30, "message": "正在生成文章..."}
         source_type = req.source_type or "url"
         source = req.topic if source_type == "topic" else req.url
@@ -407,6 +412,7 @@ async def get_settings():
     return {
         "ai": {
             "provider": ai_config.get("provider", "deepseek"),
+            "image_provider": ai_config.get("image_provider", ""),
             "deepseek": _safe_config_section(ai_config.get("deepseek", {})),
             "kimi": _safe_config_section(ai_config.get("kimi", {})),
             "minimax": _safe_config_section(ai_config.get("minimax", {})),

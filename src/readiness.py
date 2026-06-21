@@ -1,6 +1,11 @@
 from dataclasses import dataclass
 
-from src.ai.provider import list_provider_names, provider_supports_image
+from src.ai.provider import (
+    list_provider_names,
+    provider_config_missing,
+    provider_supports_image,
+    resolve_image_provider_name,
+)
 from src.config import Config
 
 
@@ -14,9 +19,11 @@ class ReadinessCheck:
 
 def collect_readiness(
     model: str | None = None,
+    image_model: str | None = None,
     publish: bool = False,
     check_model: bool = True,
     check_research: bool = True,
+    generate_images: bool = True,
 ) -> list[ReadinessCheck]:
     config = Config()
     checks = []
@@ -29,7 +36,7 @@ def collect_readiness(
             return checks
 
         provider_config = ai_config.get(provider, {})
-        missing = [key for key in ("api_key", "base_url", "model") if not provider_config.get(key)]
+        missing = provider_config_missing(provider, provider_config)
         if missing:
             checks.append(ReadinessCheck(
                 "model_config",
@@ -39,25 +46,46 @@ def collect_readiness(
         else:
             checks.append(ReadinessCheck("model_config", True, f"{provider} 文本模型配置完整", "info"))
 
-        if provider_supports_image(provider):
-            image_missing = []
-            if provider in {"minimax", "glm"} and not provider_config.get("image_model"):
-                image_missing.append("image_model")
-            if image_missing:
+        if generate_images:
+            image_provider = resolve_image_provider_name(image_model, provider)
+            if not image_provider:
                 checks.append(ReadinessCheck(
                     "image_config",
-                    False,
-                    f"{provider} 图片生成缺少配置: {', '.join(image_missing)}",
+                    True,
+                    "未配置可用 AI 配图模型；会使用素材图片并跳过 AI 配图",
+                    "warning",
+                ))
+            elif image_provider not in list_provider_names(include_mock=True):
+                checks.append(ReadinessCheck(
+                    "image_config",
+                    True,
+                    f"不支持的 AI 配图模型: {image_provider}；会跳过 AI 配图",
+                    "warning",
+                ))
+            elif not provider_supports_image(image_provider):
+                checks.append(ReadinessCheck(
+                    "image_config",
+                    True,
+                    f"{image_provider} 只支持文本；会跳过 AI 配图",
+                    "warning",
                 ))
             else:
-                checks.append(ReadinessCheck("image_config", True, f"{provider} 支持 AI 配图", "info"))
+                image_missing = provider_config_missing(
+                    image_provider,
+                    ai_config.get(image_provider, {}),
+                    require_image=True,
+                )
+                if image_missing:
+                    checks.append(ReadinessCheck(
+                        "image_config",
+                        True,
+                        f"{image_provider} 图片生成缺少配置: {', '.join(image_missing)}；会跳过 AI 配图",
+                        "warning",
+                    ))
+                else:
+                    checks.append(ReadinessCheck("image_config", True, f"AI 配图模型可用: {image_provider}", "info"))
         else:
-            checks.append(ReadinessCheck(
-                "image_config",
-                True,
-                f"{provider} 只支持文本；AI 配图会跳过，可依赖素材图片或改用 MiniMax/GLM",
-                "warning",
-            ))
+            checks.append(ReadinessCheck("image_config", True, "本次不生成 AI 配图", "info"))
 
     if check_research:
         research_config = config.get("research", default={}) or {}

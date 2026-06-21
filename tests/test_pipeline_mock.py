@@ -1,5 +1,8 @@
 import asyncio
+from pathlib import Path
+from src.ai.provider import GenerateResult
 from src.pipeline import ArticleGenerationPipeline
+import src.pipeline as pipeline_module
 
 
 def test_source_driven_pipeline_with_mock(local_tmp):
@@ -57,3 +60,46 @@ def test_pipeline_collects_nonfatal_image_warnings(local_tmp):
     assert result is not None
     assert result["ai_images"] == []
     assert any("image quota exhausted" in warning for warning in result["warnings"])
+
+
+def test_pipeline_can_use_separate_image_provider(local_tmp, monkeypatch):
+    src = local_tmp / "demo.md"
+    image_path = local_tmp / "generated.png"
+    src.write_text("# 标题\n\n正文内容", encoding="utf-8")
+    calls = []
+
+    class FakeTextProvider:
+        def generate(self, prompt, **kwargs):
+            return GenerateResult("<h2>正文</h2><p>内容</p>")
+
+        def generate_image(self, prompt, **kwargs):
+            raise NotImplementedError("text only")
+
+    class FakeImageProvider:
+        def generate(self, prompt, **kwargs):
+            return GenerateResult("unused")
+
+        def generate_image(self, prompt, **kwargs):
+            calls.append(("image", prompt))
+            image_path.write_bytes(b"fake-image")
+            return str(image_path)
+
+    def fake_get_provider(name=None):
+        if name == "glm":
+            return FakeImageProvider()
+        return FakeTextProvider()
+
+    monkeypatch.setattr(pipeline_module, "get_provider", fake_get_provider)
+
+    pipe = ArticleGenerationPipeline(model="deepseek", image_model="glm")
+    result = asyncio.run(pipe.run(
+        source=str(src),
+        source_type="file",
+        generate_images=True,
+    ))
+
+    assert result is not None
+    assert calls and calls[0][0] == "image"
+    assert result["image_provider"] == "glm"
+    assert result["ai_images"][0]["provider"] == "glm"
+    assert Path(result["ai_images"][0]["path"]).exists()

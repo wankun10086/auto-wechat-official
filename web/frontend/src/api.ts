@@ -5,6 +5,7 @@ export interface GenerateParams {
   topic?: string
   source_type?: 'url' | 'file' | 'topic'
   model?: string
+  image_model?: string
   style: string
   prompt: string
   screenshot: string
@@ -139,6 +140,7 @@ export async function getModels(): Promise<ModelInfo[]> {
 export interface SettingsData {
   ai: {
     provider: string
+    image_provider: string
     deepseek: { api_key?: string; api_key_set?: boolean; base_url?: string; model?: string }
     kimi: { api_key?: string; api_key_set?: boolean; base_url?: string; model?: string }
     minimax: { api_key?: string; api_key_set?: boolean; base_url?: string; model?: string; image_model?: string }

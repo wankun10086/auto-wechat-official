@@ -7,7 +7,7 @@ from pathlib import Path
 from bs4 import BeautifulSoup
 from loguru import logger
 
-from src.ai.provider import get_provider
+from src.ai.provider import get_provider, provider_supports_image, resolve_image_provider_name, resolve_provider_name
 from src.config import Config, load_prompt
 from src.content.fetcher import ContentFetcher, ContentResult
 from src.content.humanizer import Humanizer
@@ -31,9 +31,12 @@ class PublishResult:
 
 
 class ArticleGenerationPipeline:
-    def __init__(self, model: str = None, init_provider: bool = True):
+    def __init__(self, model: str = None, image_model: str = None, init_provider: bool = True):
         self.config = Config()
+        self.provider_name = resolve_provider_name(model)
+        self.image_provider_name = resolve_image_provider_name(image_model, self.provider_name)
         self.provider = get_provider(model) if init_provider else None
+        self.image_provider = None
         self.fetcher = ContentFetcher()
         self.template = ArticleTemplate()
         self.prompts = load_prompt("tech_article")
@@ -155,6 +158,7 @@ class ArticleGenerationPipeline:
                 "warnings": list(self.warnings),
                 "source_urls": result_metadata["source_urls"],
                 "research_query": result_metadata["research_query"],
+                "image_provider": result_metadata["image_provider"],
             }
 
         except Exception as e:
@@ -303,15 +307,27 @@ class ArticleGenerationPipeline:
 
     async def _generate_ai_images(self, content_result: ContentResult, article: str) -> list:
         try:
+            provider = self._get_image_provider()
+            if not provider:
+                self._add_warning("未配置可用AI配图模型，已跳过AI配图")
+                return []
+
+            article_summary = BeautifulSoup(article or "", "html.parser").get_text(" ", strip=True)[:500]
             image_prompt = (
                 "为微信公众号文章生成一张原创封面配图，中文科技媒体风格，"
                 "现代、清晰、不要文字水印、不要品牌商标。"
                 f"文章议题：{content_result.title}。"
+                f"文章摘要：{article_summary}"
             )
-            image_path = self.provider.generate_image(image_prompt)
-            return [{"path": image_path, "description": "AI生成配图", "type": "ai_generated"}]
+            image_path = provider.generate_image(image_prompt)
+            return [{
+                "path": image_path,
+                "description": "AI生成配图",
+                "type": "ai_generated",
+                "provider": self.image_provider_name,
+            }]
         except NotImplementedError as e:
-            message = f"当前模型不支持图片生成，已跳过AI配图: {e}"
+            message = f"{self.image_provider_name or '当前模型'} 不支持图片生成，已跳过AI配图: {e}"
             self._add_warning(message)
             logger.info(message)
             return []
@@ -323,6 +339,18 @@ class ArticleGenerationPipeline:
     def _add_warning(self, message: str) -> None:
         if message and message not in self.warnings:
             self.warnings.append(message)
+
+    def _get_image_provider(self):
+        if not self.image_provider_name:
+            return None
+        if not provider_supports_image(self.image_provider_name):
+            self._add_warning(f"{self.image_provider_name} 不支持图片生成，已跳过AI配图")
+            return None
+        if self.provider and self.image_provider_name == self.provider_name:
+            return self.provider
+        if self.image_provider is None:
+            self.image_provider = get_provider(self.image_provider_name)
+        return self.image_provider
 
     def _append_reference_sources(self, article_html: str, content_result: ContentResult) -> str:
         urls = content_result.metadata.get("source_urls") or []
@@ -360,6 +388,8 @@ class ArticleGenerationPipeline:
             "material_images": material_images,
             "ai_images": ai_images,
             "warnings": list(self.warnings),
+            "text_provider": self.provider_name,
+            "image_provider": self.image_provider_name,
         }
 
     def _embed_images(self, article_html: str, images: list) -> str:
