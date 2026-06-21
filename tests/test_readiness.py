@@ -144,6 +144,64 @@ def test_readiness_uses_configured_image_provider_for_text_model():
     assert any(c.name == "image_config" and "glm" in c.message for c in checks)
 
 
+def test_readiness_warns_about_invalid_configured_minimax_image_model():
+    cfg = Config()
+    old_ai = cfg._data.get("ai", {}).copy()
+    cfg._data["ai"] = {
+        "provider": "deepseek",
+        "deepseek": {
+            "api_key": "deepseek-key",
+            "base_url": "https://deepseek.example",
+            "model": "deepseek-chat",
+        },
+        "minimax": {
+            "api_key": "minimax-key",
+            "base_url": "https://api.minimaxi.com/anthropic",
+            "model": "MiniMax-M3",
+            "image_model": "MiniMax-M3",
+        },
+    }
+    try:
+        checks = collect_readiness(model="deepseek", publish=False)
+    finally:
+        cfg._data["ai"] = old_ai
+
+    assert readiness_ok(checks) is True
+    image_check = next(c for c in checks if c.name == "image_config")
+    assert image_check.severity == "warning"
+    assert "minimax 图片生成配置不可用" in image_check.message
+    assert "文本模型" in image_check.message
+
+
+def test_configured_image_provider_invalid_is_blocking():
+    cfg = Config()
+    old_ai = cfg._data.get("ai", {}).copy()
+    cfg._data["ai"] = {
+        "provider": "deepseek",
+        "image_provider": "minimax",
+        "deepseek": {
+            "api_key": "deepseek-key",
+            "base_url": "https://deepseek.example",
+            "model": "deepseek-chat",
+        },
+        "minimax": {
+            "api_key": "minimax-key",
+            "base_url": "https://api.minimaxi.com/anthropic",
+            "model": "MiniMax-M3",
+            "image_model": "MiniMax-M3",
+        },
+    }
+    try:
+        checks = collect_readiness(model="deepseek", publish=False)
+    finally:
+        cfg._data["ai"] = old_ai
+
+    assert readiness_ok(checks) is False
+    image_check = next(c for c in checks if c.name == "image_config")
+    assert image_check.ok is False
+    assert "image_model" in image_check.message
+
+
 def test_readiness_explicit_image_model_missing_config_is_blocking():
     cfg = Config()
     old_ai = cfg._data.get("ai", {}).copy()
@@ -237,6 +295,81 @@ def test_live_readiness_reports_image_api_failure_without_secret(monkeypatch):
     assert image_check.ok is False
     assert "invalid" in image_check.message
     assert "sk-sensitive-minimax-key" not in image_check.message
+
+
+def test_live_readiness_static_invalid_image_config_does_not_call_generate_image(monkeypatch):
+    cfg = Config()
+    old_ai = cfg._data.get("ai", {}).copy()
+    cfg._data["ai"] = {
+        "provider": "deepseek",
+        "image_provider": "minimax",
+        "deepseek": {
+            "api_key": "deepseek-key",
+            "base_url": "https://deepseek.example",
+            "model": "deepseek-chat",
+        },
+        "minimax": {
+            "api_key": "sk-sensitive-minimax-key",
+            "base_url": "https://api.minimaxi.com/anthropic",
+            "model": "MiniMax-M3",
+            "image_model": "MiniMax-M3",
+        },
+    }
+
+    class TextProvider:
+        def generate(self, prompt, **kwargs):
+            return GenerateResult("OK")
+
+    def fake_get_provider(name=None):
+        if name == "minimax":
+            raise AssertionError("static invalid image config should not construct image provider")
+        return TextProvider()
+
+    monkeypatch.setattr(readiness_module, "get_provider", fake_get_provider)
+    try:
+        checks = collect_live_readiness(model="deepseek", publish=False)
+    finally:
+        cfg._data["ai"] = old_ai
+
+    assert readiness_ok(checks) is False
+    image_check = next(c for c in checks if c.name == "image_live")
+    assert image_check.ok is False
+    assert "配置不完整" in image_check.message
+    assert "sk-sensitive-minimax-key" not in image_check.message
+
+
+def test_live_readiness_auto_invalid_image_config_is_blocking(monkeypatch):
+    cfg = Config()
+    old_ai = cfg._data.get("ai", {}).copy()
+    cfg._data["ai"] = {
+        "provider": "deepseek",
+        "deepseek": {
+            "api_key": "deepseek-key",
+            "base_url": "https://deepseek.example",
+            "model": "deepseek-chat",
+        },
+        "minimax": {
+            "api_key": "minimax-key",
+            "base_url": "https://api.minimaxi.com/anthropic",
+            "model": "MiniMax-M3",
+            "image_model": "MiniMax-M3",
+        },
+    }
+
+    class TextProvider:
+        def generate(self, prompt, **kwargs):
+            return GenerateResult("OK")
+
+    monkeypatch.setattr(readiness_module, "get_provider", lambda name=None: TextProvider())
+    try:
+        checks = collect_live_readiness(model="deepseek", publish=False)
+    finally:
+        cfg._data["ai"] = old_ai
+
+    assert readiness_ok(checks) is False
+    image_check = next(c for c in checks if c.name == "image_live")
+    assert image_check.ok is False
+    assert "minimax 图片生成配置不可用" in image_check.message
 
 
 def test_live_readiness_checks_wechat_when_publish(monkeypatch):

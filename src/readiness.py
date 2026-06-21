@@ -53,15 +53,27 @@ def collect_readiness(
             checks.append(ReadinessCheck("model_config", True, f"{provider} 文本模型配置完整", "info"))
 
         if generate_images:
-            explicitly_requested_image = bool(image_model and image_model.strip().lower() not in {"auto", "none"})
+            configured_image_provider = str(ai_config.get("image_provider") or "").strip().lower()
+            explicitly_requested_image = bool(
+                image_model and image_model.strip().lower() not in {"auto", "none"}
+            ) or bool(configured_image_provider and configured_image_provider not in {"auto", "none"})
             image_provider = resolve_image_provider_name(image_model, provider)
             if not image_provider:
-                checks.append(ReadinessCheck(
-                    "image_config",
-                    True,
-                    "未配置可用 AI 配图模型；会使用素材图片并跳过 AI 配图",
-                    "warning",
-                ))
+                configured_issue = _configured_image_provider_issue(ai_config)
+                if configured_issue:
+                    checks.append(ReadinessCheck(
+                        "image_config",
+                        True,
+                        f"{configured_issue}；会跳过 AI 配图",
+                        "warning",
+                    ))
+                else:
+                    checks.append(ReadinessCheck(
+                        "image_config",
+                        True,
+                        "未配置可用 AI 配图模型；会使用素材图片并跳过 AI 配图",
+                        "warning",
+                    ))
             elif image_provider not in list_provider_names(include_mock=True):
                 checks.append(ReadinessCheck(
                     "image_config",
@@ -156,6 +168,21 @@ def readiness_ok(checks: list[ReadinessCheck]) -> bool:
     return all(check.ok or check.severity == "warning" for check in checks)
 
 
+def _configured_image_provider_issue(ai_config: dict) -> str:
+    for provider_name in ("minimax", "glm"):
+        provider_config = ai_config.get(provider_name, {}) or {}
+        configured = any(
+            provider_config.get(key)
+            for key in ("api_key", "base_url", "image_base_url", "model", "image_model")
+        )
+        if not configured:
+            continue
+        missing = provider_config_missing(provider_name, provider_config, require_image=True)
+        if missing:
+            return f"{provider_name} 图片生成配置不可用: {', '.join(missing)}"
+    return ""
+
+
 def collect_live_readiness(
     model: str | None = None,
     image_model: str | None = None,
@@ -181,7 +208,11 @@ def collect_live_readiness(
     if generate_images:
         image_provider = resolve_image_provider_name(image_model, provider_name)
         if not image_provider:
-            checks.append(ReadinessCheck("image_live", True, "未配置可用 AI 配图模型；跳过图片实测", "warning"))
+            configured_issue = _configured_image_provider_issue(ai_config)
+            if configured_issue:
+                checks.append(ReadinessCheck("image_live", False, f"{configured_issue}；无法实测 AI 配图"))
+            else:
+                checks.append(ReadinessCheck("image_live", True, "未配置可用 AI 配图模型；跳过图片实测", "warning"))
         elif not provider_supports_image(image_provider):
             checks.append(ReadinessCheck("image_live", False, f"{image_provider} 不支持图片生成"))
         elif provider_config_missing(image_provider, ai_config.get(image_provider, {}), require_image=True):
