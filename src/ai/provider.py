@@ -27,6 +27,16 @@ class BaseProvider(ABC):
 
 
 IMAGE_PROVIDER_NAMES = ["minimax", "glm"]
+PLACEHOLDER_MARKERS = (
+    "your-",
+    "your_",
+    "sk-your-",
+    "replace-",
+    "todo-",
+    "请填写",
+    "填入",
+    "待填写",
+)
 
 
 def get_provider(name: str = None) -> BaseProvider:
@@ -100,8 +110,12 @@ def provider_config_missing(provider_name: str, provider_config: dict = None, re
     config = Config()
     provider_config = provider_config if provider_config is not None else config.ai.get(provider_name, {})
     required = ["api_key", "base_url", "model"]
-    missing = [key for key in required if not provider_config.get(key)]
-    if require_image and provider_name in {"minimax", "glm"} and not provider_config.get("image_model"):
+    missing = [key for key in required if not provider_config.get(key) or is_placeholder_value(provider_config.get(key))]
+    if (
+        require_image
+        and provider_name in {"minimax", "glm"}
+        and (not provider_config.get("image_model") or is_placeholder_value(provider_config.get("image_model")))
+    ):
         missing.append("image_model")
     return missing
 
@@ -115,3 +129,10 @@ def list_provider_names(include_mock: bool = False) -> list:
 
 def provider_supports_image(name: str) -> bool:
     return name in {"minimax", "glm", "mock"}
+
+
+def is_placeholder_value(value) -> bool:
+    text = str(value or "").strip().lower()
+    if not text:
+        return True
+    return any(marker in text for marker in PLACEHOLDER_MARKERS)

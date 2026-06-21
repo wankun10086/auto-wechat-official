@@ -18,6 +18,26 @@ def test_readiness_reports_missing_provider_config():
     assert any(c.name == "model_config" and not c.ok for c in checks)
 
 
+def test_readiness_rejects_placeholder_provider_config():
+    cfg = Config()
+    old_ai = cfg._data.get("ai", {}).copy()
+    cfg._data["ai"] = {
+        "provider": "deepseek",
+        "deepseek": {
+            "api_key": "sk-your-deepseek-key",
+            "base_url": "https://api.deepseek.com",
+            "model": "deepseek-chat",
+        },
+    }
+    try:
+        checks = collect_readiness(model="deepseek", publish=False)
+    finally:
+        cfg._data["ai"] = old_ai
+
+    assert readiness_ok(checks) is False
+    assert any(c.name == "model_config" and not c.ok and "api_key" in c.message for c in checks)
+
+
 def test_readiness_publish_checks_wechat_without_exposing_values():
     cfg = Config()
     old_ai = cfg._data.get("ai", {}).copy()
@@ -46,6 +66,30 @@ def test_readiness_publish_checks_wechat_without_exposing_values():
     messages = "\n".join(c.message for c in checks)
     assert "secret-ai" not in messages
     assert "wechat-secret" not in messages
+    assert any(c.name == "cover" and c.severity == "warning" for c in checks)
+
+
+def test_readiness_rejects_placeholder_wechat_credentials():
+    cfg = Config()
+    old_ai = cfg._data.get("ai", {}).copy()
+    old_wechat = cfg._data.get("wechat", {}).copy()
+    cfg._data["ai"] = {
+        "provider": "mock",
+        "mock": {},
+    }
+    cfg._data["wechat"] = {
+        "app_id": "your-app-id",
+        "app_secret": "your-app-secret",
+        "default_thumb_media_id": "your-thumb-media-id",
+    }
+    try:
+        checks = collect_readiness(model="mock", publish=True)
+    finally:
+        cfg._data["ai"] = old_ai
+        cfg._data["wechat"] = old_wechat
+
+    assert readiness_ok(checks) is False
+    assert any(c.name == "wechat" and not c.ok for c in checks)
     assert any(c.name == "cover" and c.severity == "warning" for c in checks)
 
 
@@ -96,3 +140,42 @@ def test_readiness_uses_configured_image_provider_for_text_model():
 
     assert readiness_ok(checks) is True
     assert any(c.name == "image_config" and "glm" in c.message for c in checks)
+
+
+def test_readiness_explicit_image_model_missing_config_is_blocking():
+    cfg = Config()
+    old_ai = cfg._data.get("ai", {}).copy()
+    cfg._data["ai"] = {
+        "provider": "deepseek",
+        "deepseek": {
+            "api_key": "deepseek-key",
+            "base_url": "https://deepseek.example",
+            "model": "deepseek-chat",
+        },
+        "glm": {
+            "api_key": "",
+            "base_url": "",
+            "model": "",
+            "image_model": "",
+        },
+    }
+    try:
+        checks = collect_readiness(model="deepseek", image_model="glm", publish=False)
+    finally:
+        cfg._data["ai"] = old_ai
+
+    assert readiness_ok(checks) is False
+    assert any(c.name == "image_config" and not c.ok for c in checks)
+
+
+def test_readiness_accepts_mock_provider_without_secrets():
+    cfg = Config()
+    old_ai = cfg._data.get("ai", {}).copy()
+    cfg._data["ai"] = {"provider": "mock", "mock": {}}
+    try:
+        checks = collect_readiness(model="mock", publish=False, check_research=False)
+    finally:
+        cfg._data["ai"] = old_ai
+
+    assert readiness_ok(checks) is True
+    assert any(c.name == "model_config" and c.ok for c in checks)

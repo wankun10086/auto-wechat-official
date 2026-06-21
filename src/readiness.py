@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
 from src.ai.provider import (
+    is_placeholder_value,
     list_provider_names,
     provider_config_missing,
     provider_supports_image,
@@ -31,7 +32,7 @@ def collect_readiness(
     provider = model or ai_config.get("provider", "deepseek")
 
     if check_model:
-        if provider not in list_provider_names():
+        if provider not in list_provider_names(include_mock=True):
             checks.append(ReadinessCheck("model", False, f"不支持的模型: {provider}"))
             return checks
 
@@ -47,6 +48,7 @@ def collect_readiness(
             checks.append(ReadinessCheck("model_config", True, f"{provider} 文本模型配置完整", "info"))
 
         if generate_images:
+            explicitly_requested_image = bool(image_model and image_model.strip().lower() not in {"auto", "none"})
             image_provider = resolve_image_provider_name(image_model, provider)
             if not image_provider:
                 checks.append(ReadinessCheck(
@@ -58,16 +60,24 @@ def collect_readiness(
             elif image_provider not in list_provider_names(include_mock=True):
                 checks.append(ReadinessCheck(
                     "image_config",
-                    True,
-                    f"不支持的 AI 配图模型: {image_provider}；会跳过 AI 配图",
-                    "warning",
+                    not explicitly_requested_image,
+                    (
+                        f"不支持的 AI 配图模型: {image_provider}"
+                        if explicitly_requested_image
+                        else f"不支持的 AI 配图模型: {image_provider}；会跳过 AI 配图"
+                    ),
+                    "error" if explicitly_requested_image else "warning",
                 ))
             elif not provider_supports_image(image_provider):
                 checks.append(ReadinessCheck(
                     "image_config",
-                    True,
-                    f"{image_provider} 只支持文本；会跳过 AI 配图",
-                    "warning",
+                    not explicitly_requested_image,
+                    (
+                        f"{image_provider} 不支持图片生成"
+                        if explicitly_requested_image
+                        else f"{image_provider} 只支持文本；会跳过 AI 配图"
+                    ),
+                    "error" if explicitly_requested_image else "warning",
                 ))
             else:
                 image_missing = provider_config_missing(
@@ -78,9 +88,13 @@ def collect_readiness(
                 if image_missing:
                     checks.append(ReadinessCheck(
                         "image_config",
-                        True,
-                        f"{image_provider} 图片生成缺少配置: {', '.join(image_missing)}；会跳过 AI 配图",
-                        "warning",
+                        not explicitly_requested_image,
+                        (
+                            f"{image_provider} 图片生成缺少配置: {', '.join(image_missing)}"
+                            if explicitly_requested_image
+                            else f"{image_provider} 图片生成缺少配置: {', '.join(image_missing)}；会跳过 AI 配图"
+                        ),
+                        "error" if explicitly_requested_image else "warning",
                     ))
                 else:
                     checks.append(ReadinessCheck("image_config", True, f"AI 配图模型可用: {image_provider}", "info"))
@@ -105,17 +119,22 @@ def collect_readiness(
 
     if publish:
         wechat_config = config.wechat
-        missing_wechat = [key for key in ("app_id", "app_secret") if not wechat_config.get(key)]
+        missing_wechat = [
+            key
+            for key in ("app_id", "app_secret")
+            if not wechat_config.get(key) or is_placeholder_value(wechat_config.get(key))
+        ]
         if missing_wechat:
             checks.append(ReadinessCheck(
                 "wechat",
                 False,
-                f"微信草稿缺少配置: {', '.join(missing_wechat)}",
+                f"微信草稿缺少有效配置: {', '.join(missing_wechat)}",
             ))
         else:
             checks.append(ReadinessCheck("wechat", True, "微信 AppID/AppSecret 已配置", "info"))
 
-        if wechat_config.get("default_thumb_media_id"):
+        thumb_media_id = wechat_config.get("default_thumb_media_id")
+        if thumb_media_id and not is_placeholder_value(thumb_media_id):
             checks.append(ReadinessCheck("cover", True, "默认封面 thumb_media_id 已配置", "info"))
         else:
             checks.append(ReadinessCheck(

@@ -101,7 +101,9 @@ class WeChatPublisher:
         await self.page.goto(f"{self.MP_URL}/cgi-bin/appmsg?t=media/appmsg_edit_v2&action=edit&isNew=1", wait_until="networkidle")
         await self._random_delay()
 
-    async def publish_draft_via_mass_send(self, draft_media_id=None):
+    async def publish_draft_via_mass_send(self, draft_media_id=None, confirm_mass_send=False):
+        if not confirm_mass_send:
+            raise RuntimeError("最终发布需在微信公众号后台手动完成；如确需自动群发，必须显式传入 confirm_mass_send=True")
         try:
             logger.info("开始通过浏览器发布文章...")
 
@@ -132,7 +134,9 @@ class WeChatPublisher:
             await self._screenshot("publish_error")
             return False
 
-    async def schedule_mass_send(self, publish_time: datetime):
+    async def schedule_mass_send(self, publish_time: datetime, confirm_schedule=False):
+        if not confirm_schedule:
+            raise RuntimeError("定时发送需在微信公众号后台手动完成；如确需自动定时，必须显式传入 confirm_schedule=True")
         try:
             logger.info(f"设置定时发布: {publish_time}")
 

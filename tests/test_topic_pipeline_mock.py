@@ -55,7 +55,7 @@ def test_topic_pipeline_runs_offline_with_mocked_research(local_tmp, monkeypatch
     assert "AI Agent 产品趋势" in result["content"] or result["title"]
 
     session = get_session()
-    article = session.query(Article).get(result["id"])
+    article = session.get(Article, result["id"])
     notes = json.loads(article.notes)
     session.close()
 

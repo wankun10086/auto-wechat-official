@@ -204,7 +204,7 @@ class ArticleGenerationPipeline:
                 digest=result.get("digest", ""),
             )
 
-            article = session.query(Article).get(result["id"])
+            article = session.get(Article, result["id"])
             if article:
                 article.media_id = media_id
                 article.thumb_media_id = thumb_media_id
@@ -233,7 +233,7 @@ class ArticleGenerationPipeline:
         if score is None and result.get("id"):
             session = get_session(self.db_path)
             try:
-                article = session.query(Article).get(result["id"])
+                article = session.get(Article, result["id"])
                 score = article.ai_score if article else None
             finally:
                 session.close()

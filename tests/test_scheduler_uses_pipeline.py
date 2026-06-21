@@ -45,7 +45,7 @@ def test_scheduler_pipeline_reuses_topic_generation_pipeline(monkeypatch):
         async def publish(self, result):
             calls["publish"] = result["id"]
             session = get_session()
-            article = session.query(Article).get(result["id"])
+            article = session.get(Article, result["id"])
             article.media_id = "mock_media_id"
             article.status = "draft_created"
             session.commit()
@@ -146,7 +146,85 @@ def test_scheduler_records_publish_failure_message(monkeypatch):
     )
 
 
-def test_publish_via_browser_marks_article_published(monkeypatch):
+def test_create_draft_from_saved_article(monkeypatch):
+    captured = {}
+
+    class FakePipeline:
+        def __init__(self, *args, **kwargs):
+            captured["init"] = kwargs
+
+        async def publish(self, result):
+            captured["result"] = result
+            return PublishResult(True, "ok", "草稿创建成功", media_id="wechat_media_id", thumb_media_id="thumb")
+
+    monkeypatch.setattr(job_runner, "ArticleGenerationPipeline", FakePipeline)
+
+    session = get_session()
+    article = Article(
+        title="待创建草稿文章",
+        raw_content="<p>raw</p>",
+        final_content="<p>final</p>",
+        digest="digest",
+        topic="topic",
+        topic_strategy="hot_tech",
+        ai_score=0.1,
+        status="draft",
+        notes='{"ai_images":[{"path":"ai.png"}],"material_images":[],"screenshots":[]}',
+    )
+    session.add(article)
+    session.commit()
+    article_id = article.id
+    session.close()
+
+    result = asyncio.run(ArticlePipeline().create_draft(article_id))
+
+    assert result.ok is True
+    assert result.media_id == "wechat_media_id"
+    assert captured["init"] == {"init_provider": False}
+    assert captured["result"]["id"] == article_id
+    assert captured["result"]["title"] == "待创建草稿文章"
+    assert captured["result"]["content"] == "<p>final</p>"
+    assert captured["result"]["ai_score"] == 0.1
+    assert captured["result"]["ai_images"] == [{"path": "ai.png"}]
+
+
+def test_create_draft_returns_existing_media_id_without_wechat_call(monkeypatch):
+    calls = []
+
+    class FakePipeline:
+        def __init__(self, *args, **kwargs):
+            calls.append("init")
+
+    monkeypatch.setattr(job_runner, "ArticleGenerationPipeline", FakePipeline)
+
+    session = get_session()
+    article = Article(
+        title="已有草稿文章",
+        raw_content="<p>raw</p>",
+        final_content="<p>final</p>",
+        digest="digest",
+        topic="topic",
+        topic_strategy="hot_tech",
+        ai_score=0.1,
+        status="draft_created",
+        media_id="existing_media_id",
+        thumb_media_id="existing_thumb",
+    )
+    session.add(article)
+    session.commit()
+    article_id = article.id
+    session.close()
+
+    result = asyncio.run(ArticlePipeline().create_draft(article_id))
+
+    assert result.ok is True
+    assert result.code == "already_created"
+    assert result.media_id == "existing_media_id"
+    assert result.thumb_media_id == "existing_thumb"
+    assert calls == []
+
+
+def test_publish_via_browser_requires_explicit_mass_send_confirmation(monkeypatch):
     calls = []
 
     class FakePublisher:
@@ -186,11 +264,11 @@ def test_publish_via_browser_marks_article_published(monkeypatch):
 
     ok = asyncio.run(pipeline.publish_via_browser(article_id))
 
-    assert ok is True
-    assert calls == ["start", "is_logged_in", "publish", "stop"]
+    assert ok is False
+    assert calls == []
 
     session = get_session()
-    updated = session.query(Article).get(article_id)
+    updated = session.get(Article, article_id)
     session.close()
-    assert updated.status == "published"
-    assert updated.published_at is not None
+    assert updated.status == "draft_created"
+    assert updated.published_at is None

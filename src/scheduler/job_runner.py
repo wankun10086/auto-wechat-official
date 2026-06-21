@@ -1,4 +1,5 @@
 import asyncio
+import json
 import signal
 import sys
 from datetime import datetime
@@ -10,7 +11,7 @@ from loguru import logger
 from src.config import Config, setup_logging
 from src.content.hot_topics import HotTopicCollector
 from src.db.models import Article, HotTopic, PublishLog, get_session
-from src.pipeline import ArticleGenerationPipeline
+from src.pipeline import ArticleGenerationPipeline, PublishResult
 from src.readiness import collect_readiness, readiness_ok
 from src.wechat.publisher import WeChatPublisher
 
@@ -71,7 +72,7 @@ class ArticlePipeline:
                 None if publish_result else getattr(publish_result, "message", "draft creation returned false"),
             )
 
-            article = session.query(Article).get(result["id"])
+            article = session.get(Article, result["id"])
             if article:
                 article.topic_strategy = topic_strategy
                 session.commit()
@@ -84,7 +85,32 @@ class ArticlePipeline:
         finally:
             session.close()
 
-    async def publish_via_browser(self, article_id=None):
+    async def create_draft(self, article_id):
+        session = get_session(self.db_path)
+        try:
+            article = session.get(Article, article_id)
+            if not article:
+                return PublishResult(False, "article_not_found", f"文章不存在: {article_id}")
+            if article.status == "draft_created" and article.media_id:
+                return PublishResult(
+                    True,
+                    "already_created",
+                    "微信草稿已存在",
+                    media_id=article.media_id,
+                    thumb_media_id=article.thumb_media_id,
+                )
+            result = self._article_result(article)
+        finally:
+            session.close()
+
+        pipeline = ArticleGenerationPipeline(init_provider=False)
+        return await pipeline.publish(result)
+
+    async def publish_via_browser(self, article_id=None, confirm_mass_send=False):
+        if not confirm_mass_send:
+            logger.error("浏览器群发需要显式 confirm_mass_send=True；创建草稿请调用 create_draft")
+            return False
+
         session = get_session(self.db_path)
         try:
             await self.publisher.start()
@@ -95,9 +121,9 @@ class ArticlePipeline:
                     logger.error("登录失败，无法发布")
                     return False
 
-            result = await self.publisher.publish_draft_via_mass_send()
+            result = await self.publisher.publish_draft_via_mass_send(confirm_mass_send=True)
             if result and article_id:
-                article = session.query(Article).get(article_id)
+                article = session.get(Article, article_id)
                 if article:
                     article.status = "published"
                     article.published_at = datetime.now()
@@ -106,6 +132,28 @@ class ArticlePipeline:
         finally:
             await self.publisher.stop()
             session.close()
+
+    def _article_result(self, article):
+        metadata = self._article_metadata(article)
+        return {
+            "id": article.id,
+            "title": article.title,
+            "content": article.final_content or article.raw_content or "",
+            "digest": article.digest or "",
+            "ai_score": article.ai_score,
+            "ai_images": metadata.get("ai_images", []),
+            "material_images": metadata.get("material_images", []),
+            "screenshots": metadata.get("screenshots", []),
+        }
+
+    def _article_metadata(self, article):
+        if not article.notes:
+            return {}
+        try:
+            data = json.loads(article.notes)
+        except (TypeError, ValueError):
+            return {}
+        return data if isinstance(data, dict) else {}
 
     async def _select_topic(self, strategy, session):
         existing = session.query(HotTopic).filter_by(used=False).order_by(

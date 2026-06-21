@@ -7,7 +7,7 @@ from src.config import Config, setup_logging
 from loguru import logger
 
 
-AI_MODELS = ["deepseek", "kimi", "minimax", "glm"]
+AI_MODELS = ["deepseek", "kimi", "minimax", "glm", "mock"]
 
 
 def build_parser():
@@ -242,8 +242,13 @@ def cmd_list():
         return
     print(f"\n最近 {len(articles)} 篇文章:\n")
     for a in articles:
-        status_icon = {"draft": " ", "draft_created": " ", "published": "✅", "failed": "❌"}.get(a.status, "❓")
-        print(f"  {status_icon} [{a.id}] {a.title}")
+        status_label = {
+            "draft": "DRAFT",
+            "draft_created": "WECHAT_DRAFT",
+            "published": "PUBLISHED",
+            "failed": "FAILED",
+        }.get(a.status, "UNKNOWN")
+        print(f"  [{status_label}] [{a.id}] {a.title}")
         print(f"     状态: {a.status} | AI味: {a.ai_score or 0:.2f} | 创建: {a.created_at.strftime('%m-%d %H:%M')}")
     session.close()
 
@@ -256,7 +261,7 @@ async def cmd_draft(args):
         return
 
     session = get_session()
-    article = session.query(Article).get(args.id)
+    article = session.get(Article, args.id)
     if not article:
         session.close()
         print(f"文章不存在: {args.id}")
@@ -305,9 +310,13 @@ def cmd_models():
     print("可用模型:")
     for name in AI_MODELS:
         provider_config = ai_config.get(name, {})
-        model = provider_config.get("model", "未配置")
-        has_key = "✅" if provider_config.get("api_key") else "❌ 未配置API Key"
-        marker = " ← 当前" if name == current else ""
+        if name == "mock":
+            model = "offline-deterministic"
+            has_key = "[OK] 离线"
+        else:
+            model = provider_config.get("model", "未配置")
+            has_key = "[OK]" if provider_config.get("api_key") else "[MISS] 未配置API Key"
+        marker = " <- 当前" if name == current else ""
         print(f"  {name:12s} | 模型: {model:20s} | {has_key}{marker}")
 
     print(f"\n切换方式: python cli.py from-url <url> --model <name>")
@@ -320,7 +329,7 @@ def cmd_doctor(args) -> int:
     print("\n配置检查:\n")
     icons = {"error": "[ERR]", "warning": "[WARN]", "info": "[OK]"}
     for item in checks:
-        icon = icons.get(item.severity, "•")
+        icon = icons.get(item.severity, "[*]")
         if item.ok and item.severity != "warning":
             icon = "[OK]"
         elif not item.ok:

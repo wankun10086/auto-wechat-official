@@ -422,7 +422,7 @@ def test_module_publish_contract(monkeypatch):
     # 状态应流转到 draft_created
     from src.db.models import get_session, Article
     s = get_session()
-    a = s.query(Article).get(aid)
+    a = s.get(Article, aid)
     s.close()
     assert a.status == "draft_created"
     assert a.media_id == "mock_media_id_001"

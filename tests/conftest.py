@@ -18,9 +18,7 @@ TMP_ROOT = ROOT / "data" / ".pytest_tmp"
 def _isolate_db():
     """把数据库指向项目内临时文件，测试绝不污染真实的 data/articles.db。"""
     TMP_ROOT.mkdir(parents=True, exist_ok=True)
-    db_path = TMP_ROOT / "test.db"
-    if db_path.exists():
-        db_path.unlink()
+    db_path = TMP_ROOT / f"test-{uuid.uuid4().hex[:8]}.db"
     from src.config import Config
     cfg = Config()
     if cfg._data is None:

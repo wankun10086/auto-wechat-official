@@ -285,7 +285,7 @@ async def list_articles():
 @router.get("/articles/{article_id}", response_model=ArticleDetail)
 async def get_article(article_id: int):
     session = get_session()
-    a = session.query(Article).get(article_id)
+    a = session.get(Article, article_id)
     if not a:
         session.close()
         raise HTTPException(status_code=404, detail="文章不存在")
@@ -317,7 +317,7 @@ async def get_article(article_id: int):
 @router.post("/articles/{article_id}/publish", response_model=PublishResponse)
 async def publish_article(article_id: int):
     session = get_session()
-    a = session.query(Article).get(article_id)
+    a = session.get(Article, article_id)
     if not a:
         session.close()
         raise HTTPException(status_code=404, detail="文章不存在")
@@ -363,7 +363,7 @@ async def _publish_inner(article_id: int, result: dict):
         publish_result = await pipeline.publish(result)
         if publish_result:
             session2 = get_session()
-            art = session2.query(Article).get(article_id)
+            art = session2.get(Article, article_id)
             if art:
                 art.status = "draft_created"
                 session2.commit()
