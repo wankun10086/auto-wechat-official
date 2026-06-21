@@ -43,8 +43,8 @@ ai:
     api_key: "sk-your-minimax-key"
     base_url: https://api.minimaxi.com/anthropic
     model: MiniMax-M3
-    image_base_url: https://api.minimax.io
-    image_model: image-01
+    image_base_url: https://api.minimax.io   # 图片接口地址，不是 /anthropic 文本接口
+    image_model: image-01                    # 图片模型；不要填 MiniMax-M3
   glm:
     api_key: "your-zhipu-api-key"
     base_url: https://open.bigmodel.cn/api/paas/v4
@@ -101,9 +101,10 @@ python cli.py list
 python cli.py topics
 python cli.py models
 python cli.py doctor --model minimax --publish
+python cli.py doctor --publish --live
 ```
 
-`doctor` 只报告配置项是否存在，不打印密钥值；加 `--publish` 会同时检查微信草稿所需的 AppID/AppSecret 和封面兜底情况。
+`doctor` 不打印密钥值；加 `--publish` 会同时检查微信草稿所需的 AppID/AppSecret 和封面兜底情况。`--live` 会实际调用文本模型、AI 配图模型和微信草稿接口，可能产生远端调用费用；它用于验收“云端模型真的可用”，尤其适合在创建严格草稿前运行。
 
 ## Web UI
 
@@ -135,7 +136,15 @@ python -m src.scheduler.job_runner start
 ## 图片与草稿箱
 
 - MiniMax 和 GLM 支持 AI 配图；DeepSeek 和 Kimi 只负责文本。
+- MiniMax 图片接口使用 `image_base_url: https://api.minimax.io` 和 `image_model: image-01`；`image_model` 不能填文本模型名 `MiniMax-M3`。如果 `doctor --publish --live` 返回 `invalid api key`，说明图片 API Key 或账号权限需要在 MiniMax 控制台修复。
 - 议题模式会从检索素材中提取图片候选，也会显式搜索图片；下载时会跳过坏链接、非图片响应和过小图片，优先把成功落地的本地图片嵌入文章。
+- 默认情况下，AI 配图失败会降级为使用素材图并记录 warning。验收完整链路时使用 `--require-ai-image`，AI 配图为 0 会停止创建微信草稿：
+
+```bash
+python cli.py doctor --publish --live
+python cli.py from-topic "AI Agent 产品趋势" --publish --require-ai-image
+```
+
 - 创建微信草稿前，本地 `<img src="...">` 会通过 `media/uploadimg` 上传并替换为微信图片 URL。
 - 如果 `default_thumb_media_id` 为空，系统会尝试上传本次生成/检索到的第一张本地图片作为封面素材；从 Web UI 稍后发布时，也会从已保存 HTML 中的第一张本地图片兜底取封面。
 - 已经是 `http://`、`https://` 或 `data:` 的图片 URL 不会被本地上传逻辑改写。

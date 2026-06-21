@@ -21,8 +21,8 @@ ai:
     api_key: "sk-your-minimax-key"
     base_url: https://api.minimaxi.com/anthropic
     model: MiniMax-M3
-    image_base_url: https://api.minimax.io
-    image_model: image-01
+    image_base_url: https://api.minimax.io   # image API host, not the /anthropic text endpoint
+    image_model: image-01                    # do not set this to MiniMax-M3
   glm:
     api_key: "your-zhipu-api-key"
     base_url: https://open.bigmodel.cn/api/paas/v4
