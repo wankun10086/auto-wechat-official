@@ -66,7 +66,7 @@ export default function ArticlePreview({ article, onBack, onPublished }: Props) 
       />
 
       <div className="article-actions">
-        {article.status !== 'published' && (
+        {article.status !== 'published' && article.status !== 'draft_created' && (
           <button
             className="btn btn-primary"
             onClick={handlePublish}
@@ -75,6 +75,9 @@ export default function ArticlePreview({ article, onBack, onPublished }: Props) 
             {publishing && <span className="loading-spinner" />}
             推送到草稿箱
           </button>
+        )}
+        {article.status === 'draft_created' && (
+          <span className="published-note">已在微信草稿箱</span>
         )}
         {article.status === 'published' && (
           <span className="published-note">已发布到微信</span>

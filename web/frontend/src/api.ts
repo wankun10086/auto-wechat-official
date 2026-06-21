@@ -120,10 +120,10 @@ export async function getModels(): Promise<ModelInfo[]> {
 export interface SettingsData {
   ai: {
     provider: string
-    deepseek: { api_key?: string; base_url?: string; model?: string }
-    kimi: { api_key?: string; base_url?: string; model?: string }
-    minimax: { api_key?: string; base_url?: string; model?: string; image_model?: string }
-    glm: { api_key?: string; base_url?: string; model?: string; image_model?: string; image_size?: string }
+    deepseek: { api_key?: string; api_key_set?: boolean; base_url?: string; model?: string }
+    kimi: { api_key?: string; api_key_set?: boolean; base_url?: string; model?: string }
+    minimax: { api_key?: string; api_key_set?: boolean; base_url?: string; model?: string; image_model?: string }
+    glm: { api_key?: string; api_key_set?: boolean; base_url?: string; model?: string; image_model?: string; image_size?: string }
     temperature: number
     max_tokens: number
   }

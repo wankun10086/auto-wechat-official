@@ -2,6 +2,8 @@ from pathlib import Path
 
 from src.ai.mock import MockProvider
 from src.ai.provider import get_provider
+from src.config import Config
+import pytest
 
 
 def test_mock_provider_registered():
@@ -28,3 +30,14 @@ def test_mock_generate_image_returns_local_file():
     p = get_provider("mock")
     path = p.generate_image("封面图")
     assert Path(path).exists()
+
+
+def test_non_mock_provider_requires_basic_config():
+    cfg = Config()
+    old = dict(cfg._data.get("ai", {}).get("glm", {}))
+    cfg._data.setdefault("ai", {})["glm"] = {"api_key": "", "base_url": "", "model": ""}
+    try:
+        with pytest.raises(ValueError, match="glm 配置缺失"):
+            get_provider("glm")
+    finally:
+        cfg._data["ai"]["glm"] = old

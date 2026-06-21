@@ -61,6 +61,16 @@ export default function Settings({ onBack, onSaved, onError }: Props) {
     setSettings({ ...settings, content: { ...settings.content, [key]: value } })
   }
 
+  const keyPlaceholder = (provider: 'deepseek' | 'kimi' | 'minimax' | 'glm', fallback: string) => {
+    const current = settings?.ai[provider]
+    return current?.api_key_set ? '已配置，留空不修改' : fallback
+  }
+
+  const keyHint = (provider: 'deepseek' | 'kimi' | 'minimax' | 'glm') => {
+    const current = settings?.ai[provider]
+    return current?.api_key_set ? <div className="hint">API Key 已配置；只有输入新值才会覆盖。</div> : null
+  }
+
   if (!settings) {
     return (
       <div className="card">
@@ -126,7 +136,8 @@ export default function Settings({ onBack, onSaved, onError }: Props) {
             </h3>
             <div className="form-group">
               <label>API Key</label>
-              <input className="input" type="password" placeholder="sk-..." value={settings.ai.deepseek.api_key || ''} onChange={e => updateAi('deepseek', 'api_key', e.target.value)} />
+              <input className="input" type="password" placeholder={keyPlaceholder('deepseek', 'sk-...')} value={settings.ai.deepseek.api_key || ''} onChange={e => updateAi('deepseek', 'api_key', e.target.value)} />
+              {keyHint('deepseek')}
             </div>
             <div className="form-row">
               <div className="form-group" style={{ flex: 1 }}>
@@ -147,7 +158,8 @@ export default function Settings({ onBack, onSaved, onError }: Props) {
             </h3>
             <div className="form-group">
               <label>API Key</label>
-              <input className="input" type="password" placeholder="sk-..." value={settings.ai.kimi.api_key || ''} onChange={e => updateAi('kimi', 'api_key', e.target.value)} />
+              <input className="input" type="password" placeholder={keyPlaceholder('kimi', 'sk-...')} value={settings.ai.kimi.api_key || ''} onChange={e => updateAi('kimi', 'api_key', e.target.value)} />
+              {keyHint('kimi')}
             </div>
             <div className="form-row">
               <div className="form-group" style={{ flex: 1 }}>
@@ -168,7 +180,8 @@ export default function Settings({ onBack, onSaved, onError }: Props) {
             </h3>
             <div className="form-group">
               <label>API Key</label>
-              <input className="input" type="password" placeholder="输入MiniMax API Key" value={settings.ai.minimax.api_key || ''} onChange={e => updateAi('minimax', 'api_key', e.target.value)} />
+              <input className="input" type="password" placeholder={keyPlaceholder('minimax', '输入MiniMax API Key')} value={settings.ai.minimax.api_key || ''} onChange={e => updateAi('minimax', 'api_key', e.target.value)} />
+              {keyHint('minimax')}
             </div>
             <div className="form-row">
               <div className="form-group" style={{ flex: 1 }}>
@@ -193,7 +206,8 @@ export default function Settings({ onBack, onSaved, onError }: Props) {
             </h3>
             <div className="form-group">
               <label>API Key</label>
-              <input className="input" type="password" placeholder="输入智谱 API Key" value={settings.ai.glm?.api_key || ''} onChange={e => updateAi('glm', 'api_key', e.target.value)} />
+              <input className="input" type="password" placeholder={keyPlaceholder('glm', '输入智谱 API Key')} value={settings.ai.glm?.api_key || ''} onChange={e => updateAi('glm', 'api_key', e.target.value)} />
+              {keyHint('glm')}
             </div>
             <div className="form-row">
               <div className="form-group" style={{ flex: 1 }}>

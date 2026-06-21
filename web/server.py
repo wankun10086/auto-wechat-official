@@ -20,7 +20,14 @@ app = FastAPI(title="Auto WeChat", version="2.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        item.strip()
+        for item in os.environ.get(
+            "AUTOWECHAT_CORS_ORIGINS",
+            "http://127.0.0.1:8000,http://localhost:8000,http://127.0.0.1:5173,http://localhost:5173",
+        ).split(",")
+        if item.strip()
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -56,6 +63,7 @@ def main():
     config.load()
     setup_logging(config)
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8000
+    host = os.environ.get("AUTOWECHAT_HOST", "127.0.0.1")
     background = os.environ.get("AUTOWECHAT_BACKGROUND") == "1"
     if background:
         # 无窗口模式：写 PID 便于停止；关闭 reload（reload 会再开子进程）
@@ -64,7 +72,7 @@ def main():
             (Path("data") / "server.pid").write_text(str(os.getpid()), encoding="utf-8")
         except Exception:
             pass
-    uvicorn.run("web.server:app", host="0.0.0.0", port=port, reload=not background)
+    uvicorn.run("web.server:app", host=host, port=port, reload=not background)
 
 
 if __name__ == "__main__":

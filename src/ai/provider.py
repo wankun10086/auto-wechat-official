@@ -50,8 +50,21 @@ def get_provider(name: str = None) -> BaseProvider:
     if not cls:
         raise ValueError(f"不支持的provider: {provider_name}，可选: {list(providers.keys())}")
 
+    _validate_provider_config(provider_name, provider_config)
     logger.info(f"使用AI模型: {provider_name} / {provider_config.get('model', '')}")
     return cls(provider_config)
+
+
+def _validate_provider_config(provider_name: str, provider_config: dict) -> None:
+    if provider_name == "mock":
+        return
+    required = ["api_key", "base_url", "model"]
+    missing = [key for key in required if not provider_config.get(key)]
+    if missing:
+        raise ValueError(
+            f"{provider_name} 配置缺失: {', '.join(missing)}。"
+            "请在 config/config.yaml 或 Web 设置中填写后再使用。"
+        )
 
 
 def list_provider_names(include_mock: bool = False) -> list:

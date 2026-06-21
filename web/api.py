@@ -13,6 +13,7 @@ from sqlalchemy.orm import sessionmaker
 from loguru import logger
 from src.config import Config
 from src.ai.provider import list_provider_names, provider_supports_image
+from src.content.sanitize import sanitize_article_html
 from src.pipeline import ArticleGenerationPipeline
 from src.db.models import get_session, Article, LogLine
 from web.schemas import (
@@ -99,6 +100,9 @@ logger.add(sys.stderr, format="{time:HH:mm:ss} | {level: <8} | {message}", level
 logger.add(_interceptor, format="{time:HH:mm:ss} | {level: <8} | {message}", level="DEBUG")
 
 tasks: dict = {}
+
+_AI_PROVIDER_KEYS = {"deepseek", "kimi", "minimax", "glm"}
+_SECRET_KEYS = {"api_key", "app_secret"}
 
 
 def _run_pipeline_sync(task_id: str, req: GenerateRequest):
@@ -250,7 +254,7 @@ async def get_article(article_id: int):
     result = ArticleDetail(
         id=a.id,
         title=a.title or "",
-        content=a.final_content or "",
+        content=sanitize_article_html(a.final_content or ""),
         raw_content=a.raw_content or "",
         digest=a.digest or "",
         author=a.author or "",
@@ -274,6 +278,10 @@ async def publish_article(article_id: int):
     if not a:
         session.close()
         raise HTTPException(status_code=404, detail="文章不存在")
+    if a.status == "draft_created" and a.media_id:
+        media_id = a.media_id
+        session.close()
+        return PublishResponse(success=True, message=f"已存在微信草稿: {media_id}")
 
     result = {
         "id": a.id,
@@ -340,10 +348,10 @@ async def get_settings():
     return {
         "ai": {
             "provider": ai_config.get("provider", "deepseek"),
-            "deepseek": ai_config.get("deepseek", {}),
-            "kimi": ai_config.get("kimi", {}),
-            "minimax": ai_config.get("minimax", {}),
-            "glm": ai_config.get("glm", {}),
+            "deepseek": _safe_config_section(ai_config.get("deepseek", {})),
+            "kimi": _safe_config_section(ai_config.get("kimi", {})),
+            "minimax": _safe_config_section(ai_config.get("minimax", {})),
+            "glm": _safe_config_section(ai_config.get("glm", {})),
             "temperature": ai_config.get("temperature", 0.85),
             "max_tokens": ai_config.get("max_tokens", 4000),
         },
@@ -367,27 +375,56 @@ async def update_settings(body: dict):
     config_path = Path(__file__).parent.parent / "config" / "config.yaml"
     with open(config_path, "r", encoding="utf-8") as f:
         data = yaml.safe_load(f)
-    if "ai" in body:
-        for k, v in body["ai"].items():
-            if k in data["ai"]:
-                if isinstance(data["ai"][k], dict) and isinstance(v, dict):
-                    data["ai"][k].update(v)
-                else:
-                    data["ai"][k] = v
-            else:
-                data["ai"][k] = v
-    if "wechat" in body:
-        for k, v in body["wechat"].items():
-            if k in data.get("wechat", {}):
-                data["wechat"][k] = v
-    if "content" in body:
-        for k, v in body["content"].items():
-            if k in data.get("content", {}):
-                data["content"][k] = v
+    _apply_settings_update(data, body)
     with open(config_path, "w", encoding="utf-8") as f:
         yaml.dump(data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
     Config().load()
     return {"success": True, "message": "配置已保存"}
+
+
+def _safe_config_section(section: dict) -> dict:
+    result = dict(section or {})
+    for key in _SECRET_KEYS:
+        if key in result:
+            result[f"{key}_set"] = bool(result.get(key))
+            result[key] = ""
+    return result
+
+
+def _apply_settings_update(data: dict, body: dict) -> None:
+    if "ai" in body:
+        data.setdefault("ai", {})
+        for key, value in body["ai"].items():
+            if key in _AI_PROVIDER_KEYS and isinstance(value, dict):
+                target = data["ai"].setdefault(key, {})
+                _merge_public_config(target, value)
+            else:
+                data["ai"][key] = value
+    if "wechat" in body:
+        data.setdefault("wechat", {})
+        for key, value in body["wechat"].items():
+            if key in data["wechat"]:
+                if key in _SECRET_KEYS and _is_blank_secret(value):
+                    continue
+                data["wechat"][key] = value
+    if "content" in body:
+        data.setdefault("content", {})
+        for key, value in body["content"].items():
+            if key in data["content"]:
+                data["content"][key] = value
+
+
+def _merge_public_config(target: dict, incoming: dict) -> None:
+    for key, value in incoming.items():
+        if key.endswith("_set"):
+            continue
+        if key in _SECRET_KEYS and _is_blank_secret(value):
+            continue
+        target[key] = value
+
+
+def _is_blank_secret(value) -> bool:
+    return value is None or value == ""
 
 
 @router.get("/logs")

@@ -5,6 +5,7 @@ Phase 3 — 网站功能模块分步测试。
 生成/发布用 mock provider + monkeypatch，避免触碰真实 LLM 与微信。
 """
 import asyncio
+import json
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -33,11 +34,56 @@ def _generate_one(name: str) -> int:
 
 # 1) 设置模块（仅读，不写真实 config.yaml）
 def test_module_settings_read():
+    from src.config import Config
+
+    cfg = Config()
+    cfg._data.setdefault("ai", {}).setdefault("deepseek", {})["api_key"] = "unit-secret-key"
     r = client.get("/api/settings")
     assert r.status_code == 200
     d = r.json()
     assert {"ai", "wechat", "content"} <= set(d.keys())
     assert "provider" in d["ai"]
+    assert d["ai"]["deepseek"]["api_key"] == ""
+    assert d["ai"]["deepseek"]["api_key_set"] is True
+    assert "unit-secret-key" not in json.dumps(d, ensure_ascii=False)
+
+
+def test_settings_update_does_not_overwrite_blank_secrets():
+    from web.api import _apply_settings_update
+
+    data = {
+        "ai": {
+            "provider": "deepseek",
+            "deepseek": {
+                "api_key": "keep-me",
+                "base_url": "https://old.example",
+                "model": "old-model",
+            },
+        },
+        "wechat": {"app_id": "wx", "app_secret": "wechat-secret", "author": "A"},
+        "content": {"humanize_rounds": 4},
+    }
+
+    _apply_settings_update(data, {
+        "ai": {
+            "deepseek": {
+                "api_key": "",
+                "api_key_set": True,
+                "base_url": "https://new.example",
+            },
+            "provider": "kimi",
+        },
+        "wechat": {"app_secret": "", "author": "B"},
+        "content": {"humanize_rounds": 2},
+    })
+
+    assert data["ai"]["provider"] == "kimi"
+    assert data["ai"]["deepseek"]["api_key"] == "keep-me"
+    assert data["ai"]["deepseek"]["base_url"] == "https://new.example"
+    assert "api_key_set" not in data["ai"]["deepseek"]
+    assert data["wechat"]["app_secret"] == "wechat-secret"
+    assert data["wechat"]["author"] == "B"
+    assert data["content"]["humanize_rounds"] == 2
 
 
 # 2) 模型模块
@@ -88,12 +134,43 @@ def test_module_generate_and_detail():
     assert 0.0 <= float(d["ai_score"]) <= 1.0
 
 
+def test_article_detail_sanitizes_preview_html():
+    from src.db.models import get_session, Article
+
+    s = get_session()
+    article = Article(
+        title="sanitize",
+        final_content='<p onclick="steal()">正文</p><script>alert(1)</script><a href="javascript:bad()">x</a>',
+        raw_content="raw",
+        status="draft",
+    )
+    s.add(article)
+    s.commit()
+    aid = article.id
+    s.close()
+
+    r = client.get(f"/api/articles/{aid}")
+
+    assert r.status_code == 200
+    content = r.json()["content"]
+    assert "<script" not in content
+    assert "onclick" not in content
+    assert "javascript:" not in content
+    assert "正文" in content
+
+
 # 7) 发布模块（契约：monkeypatch 微信，验证状态流转，绝不触达真实微信）
 def test_module_publish_contract(monkeypatch):
     from src.wechat.api_client import WeChatAPIClient
     from src.config import Config
 
-    monkeypatch.setattr(WeChatAPIClient, "create_draft", lambda self, **kw: "mock_media_id_001")
+    calls = {"create_draft": 0}
+
+    def fake_create_draft(self, **kw):
+        calls["create_draft"] += 1
+        return "mock_media_id_001"
+
+    monkeypatch.setattr(WeChatAPIClient, "create_draft", fake_create_draft)
     Config()._data.setdefault("wechat", {})["default_thumb_media_id"] = "thumb_test"
 
     aid = _generate_one("pub.md")
@@ -109,3 +186,10 @@ def test_module_publish_contract(monkeypatch):
     s.close()
     assert a.status == "draft_created"
     assert a.media_id == "mock_media_id_001"
+    assert calls["create_draft"] == 1
+
+    r2 = client.post(f"/api/articles/{aid}/publish")
+    assert r2.status_code == 200
+    assert r2.json()["success"] is True
+    assert "已存在微信草稿" in r2.json()["message"]
+    assert calls["create_draft"] == 1

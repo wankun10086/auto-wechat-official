@@ -7,6 +7,8 @@ from bs4 import BeautifulSoup
 from pathlib import Path
 from loguru import logger
 
+from src.content.sanitize import sanitize_article_html
+
 
 def _truncate_bytes(s, max_bytes):
     while len(s.encode('utf-8')) > max_bytes:
@@ -114,6 +116,7 @@ class WeChatAPIClient:
 
     def _prepare_draft_content(self, content):
         content = re.sub(r'<style>.*?</style>', '', content or '', flags=re.DOTALL).strip()
+        content = sanitize_article_html(content)
         soup = BeautifulSoup(content, "html.parser")
         for img in soup.find_all("img"):
             src = img.get("src", "")

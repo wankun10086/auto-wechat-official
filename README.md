@@ -18,7 +18,7 @@ cd web/frontend && npm install && npm run build
 cp config/config.example.yaml config/config.yaml
 ```
 
-`config/config.yaml` 包含 API Key 和公众号密钥，已被 gitignore，不能提交。
+`config/config.yaml` 包含 API Key 和公众号密钥，已被 gitignore，不能提交。除 `mock` 外，模型启动前会校验 `api_key`、`base_url`、`model`，缺项会直接报错，避免任务跑到远端调用时才失败。
 
 关键配置：
 
@@ -110,7 +110,15 @@ FastAPI 会服务 React 构建产物：
 python -m web.server 8000
 ```
 
-Web UI 支持三种来源：议题、链接、本地文件。生成任务在后台线程中运行，日志通过 SSE 推送到页面。
+Web UI 支持三种来源：议题、链接、本地文件。生成任务在后台线程中运行，日志通过 SSE 推送到页面。服务默认只监听 `127.0.0.1`，CORS 默认只允许本机端口；如确实需要开放到局域网，可显式设置：
+
+```bash
+$env:AUTOWECHAT_HOST="0.0.0.0"
+$env:AUTOWECHAT_CORS_ORIGINS="http://你的前端域名或IP:端口"
+python -m web.server 8000
+```
+
+设置页不会回传真实 API Key；已配置的密钥会显示为“已配置”，保存时空白密钥字段不会覆盖现有密钥，只有输入新值才会更新。
 
 ## 调度器
 
@@ -128,6 +136,7 @@ python -m src.scheduler.job_runner start
 - 创建微信草稿前，本地 `<img src="...">` 会通过 `media/uploadimg` 上传并替换为微信图片 URL。
 - 如果 `default_thumb_media_id` 为空，系统会尝试上传本次生成/检索到的第一张本地图片作为封面素材；从 Web UI 稍后发布时，也会从已保存 HTML 中的第一张本地图片兜底取封面。
 - 已经是 `http://`、`https://` 或 `data:` 的图片 URL 不会被本地上传逻辑改写。
+- Web 预览和草稿创建前会净化文章 HTML，去掉脚本、事件属性、危险 URL 等主动内容；已创建过微信草稿的文章再次点击发布会直接返回已有草稿状态，不会重复创建草稿。
 
 ## 架构
 
