@@ -46,6 +46,7 @@ content:
   min_length: 1500
   max_length: 2500
   humanize_rounds: 4
+  max_ai_score_for_draft: 0.5
   banned_words:
     - 赋能
     - 抓手

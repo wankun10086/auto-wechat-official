@@ -180,6 +180,11 @@ class ArticleGenerationPipeline:
                 logger.warning(message)
                 return PublishResult(False, "missing_wechat_credentials", message)
 
+            quality_error = self._draft_quality_error(result)
+            if quality_error is not None:
+                logger.warning(quality_error.message)
+                return quality_error
+
             try:
                 thumb_media_id = self._resolve_thumb_media_id(result)
             except Exception as e:
@@ -214,6 +219,37 @@ class ArticleGenerationPipeline:
             return PublishResult(False, "wechat_api_failed", message)
         finally:
             session.close()
+
+    def _draft_quality_error(self, result: dict) -> PublishResult | None:
+        threshold = self.config.get("content", "max_ai_score_for_draft", default=0.5)
+        try:
+            threshold = float(threshold)
+        except (TypeError, ValueError):
+            threshold = 0.5
+        if threshold <= 0:
+            return None
+
+        score = result.get("ai_score")
+        if score is None and result.get("id"):
+            session = get_session(self.db_path)
+            try:
+                article = session.query(Article).get(result["id"])
+                score = article.ai_score if article else None
+            finally:
+                session.close()
+        if score is None:
+            return None
+
+        try:
+            score = float(score)
+        except (TypeError, ValueError):
+            return None
+
+        if score <= threshold:
+            return None
+
+        message = f"AI味得分 {score:.2f} 高于草稿阈值 {threshold:.2f}，请先人工检查或重新去AI味"
+        return PublishResult(False, "ai_score_too_high", message)
 
     async def _fetch_content(self, source: str, source_type: str):
         if source_type == "file":

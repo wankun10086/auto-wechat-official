@@ -105,6 +105,7 @@ tasks: dict = {}
 
 _AI_PROVIDER_KEYS = {"deepseek", "kimi", "minimax", "glm"}
 _SECRET_KEYS = {"api_key", "app_secret"}
+_CONTENT_KEYS = {"min_length", "max_length", "humanize_rounds", "max_ai_score_for_draft"}
 _MEDIA_ROOTS = {
     "research": Path("data/research_images"),
     "generated": Path("data/generated_images"),
@@ -335,6 +336,7 @@ async def publish_article(article_id: int):
         "title": a.title,
         "content": a.final_content,
         "digest": a.digest or "",
+        "ai_score": a.ai_score,
     }
     result.update(_publish_metadata(a))
     session.close()
@@ -431,6 +433,7 @@ async def get_settings():
             "min_length": config.get("content", "min_length", default=1500),
             "max_length": config.get("content", "max_length", default=2500),
             "humanize_rounds": config.get("content", "humanize_rounds", default=2),
+            "max_ai_score_for_draft": config.get("content", "max_ai_score_for_draft", default=0.5),
         },
     }
 
@@ -477,7 +480,7 @@ def _apply_settings_update(data: dict, body: dict) -> None:
     if "content" in body:
         data.setdefault("content", {})
         for key, value in body["content"].items():
-            if key in data["content"]:
+            if key in _CONTENT_KEYS:
                 data["content"][key] = value
 
 

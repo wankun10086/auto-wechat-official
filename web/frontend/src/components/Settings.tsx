@@ -282,6 +282,19 @@ export default function Settings({ onBack, onSaved, onError }: Props) {
               <input className="input" type="number" min="0" max="5" value={settings.content.humanize_rounds} onChange={e => updateContent('humanize_rounds', parseInt(e.target.value))} />
               <div className="hint">每轮包含口语化改写+情感注入，轮数越多越自然但耗时更长</div>
             </div>
+            <div className="form-group">
+              <label>草稿AI味阈值</label>
+              <input
+                className="input"
+                type="number"
+                min="0"
+                max="1"
+                step="0.05"
+                value={settings.content.max_ai_score_for_draft}
+                onChange={e => updateContent('max_ai_score_for_draft', parseFloat(e.target.value))}
+              />
+              <div className="hint">AI味得分高于该值时不会创建公众号草稿；填 0 可关闭门槛</div>
+            </div>
           </div>
         </div>
       )}

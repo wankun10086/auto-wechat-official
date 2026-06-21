@@ -272,6 +272,7 @@ async def cmd_draft(args):
         "title": article.title,
         "content": article.final_content,
         "digest": article.digest or "",
+        "ai_score": article.ai_score,
     }
     result.update(_article_publish_metadata(article))
     session.close()

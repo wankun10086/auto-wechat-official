@@ -78,7 +78,7 @@ def test_settings_update_does_not_overwrite_blank_secrets():
             "provider": "kimi",
         },
         "wechat": {"app_secret": "", "author": "B"},
-        "content": {"humanize_rounds": 2},
+        "content": {"humanize_rounds": 2, "max_ai_score_for_draft": 0.35},
     })
 
     assert data["ai"]["provider"] == "kimi"
@@ -88,6 +88,7 @@ def test_settings_update_does_not_overwrite_blank_secrets():
     assert data["wechat"]["app_secret"] == "wechat-secret"
     assert data["wechat"]["author"] == "B"
     assert data["content"]["humanize_rounds"] == 2
+    assert data["content"]["max_ai_score_for_draft"] == 0.35
 
 
 # 2) 模型模块
@@ -476,3 +477,50 @@ def test_manual_publish_does_not_require_text_model(monkeypatch):
     assert body["success"] is True
     assert body["media_id"] == "mock_media_without_model"
     assert calls["create_draft"] == 1
+
+
+def test_manual_publish_blocks_high_ai_score(monkeypatch):
+    from src.config import Config
+    from src.db.models import get_session, Article
+    from src.wechat.api_client import WeChatAPIClient
+
+    calls = {"create_draft": 0}
+
+    def fake_create_draft(self, **kw):
+        calls["create_draft"] += 1
+        return "should_not_happen"
+
+    monkeypatch.setattr(WeChatAPIClient, "create_draft", fake_create_draft)
+
+    cfg = Config()
+    old_content = dict(cfg._data.get("content", {}))
+    cfg._data.setdefault("content", {})["max_ai_score_for_draft"] = 0.5
+    cfg._data.setdefault("wechat", {})["app_id"] = "wx-test"
+    cfg._data.setdefault("wechat", {})["app_secret"] = "secret-test"
+    cfg._data.setdefault("wechat", {})["default_thumb_media_id"] = "thumb_test"
+
+    s = get_session()
+    article = Article(
+        title="high score",
+        final_content="<p>正文</p>",
+        raw_content="raw",
+        digest="digest",
+        status="draft",
+        ai_score=0.92,
+    )
+    s.add(article)
+    s.commit()
+    aid = article.id
+    s.close()
+
+    try:
+        r = client.post(f"/api/articles/{aid}/publish")
+    finally:
+        cfg._data["content"] = old_content
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["success"] is False
+    assert body["code"] == "ai_score_too_high"
+    assert "0.92" in body["message"]
+    assert calls["create_draft"] == 0

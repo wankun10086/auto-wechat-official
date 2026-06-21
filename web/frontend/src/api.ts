@@ -159,6 +159,7 @@ export interface SettingsData {
     min_length: number
     max_length: number
     humanize_rounds: number
+    max_ai_score_for_draft: number
   }
 }
 

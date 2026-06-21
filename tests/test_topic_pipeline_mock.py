@@ -232,6 +232,80 @@ def test_publish_returns_structured_error_when_thumb_upload_fails(local_tmp, mon
     assert "thumb rejected" in publish_result.message
 
 
+def test_publish_blocks_high_ai_score_before_wechat_calls(monkeypatch):
+    from src.config import Config
+
+    cfg = Config()
+    old_content = dict(cfg._data.get("content", {}))
+    cfg._data.setdefault("content", {})["max_ai_score_for_draft"] = 0.5
+
+    pipe = ArticleGenerationPipeline(model="mock")
+    pipe.api_client.app_id = "wx"
+    pipe.api_client.app_secret = "secret"
+
+    def fail_upload(path):
+        raise AssertionError("quality gate should stop before uploading thumb")
+
+    def fail_create_draft(**kwargs):
+        raise AssertionError("quality gate should stop before creating draft")
+
+    monkeypatch.setattr(pipe.api_client, "upload_thumb_image", fail_upload)
+    monkeypatch.setattr(pipe.api_client, "create_draft", fail_create_draft)
+
+    try:
+        publish_result = asyncio.run(pipe.publish({
+            "id": 0,
+            "title": "title",
+            "content": "<p>x</p>",
+            "digest": "",
+            "ai_score": 0.91,
+            "ai_images": [],
+            "material_images": [],
+            "screenshots": [],
+        }))
+    finally:
+        cfg._data["content"] = old_content
+
+    assert publish_result.ok is False
+    assert publish_result.code == "ai_score_too_high"
+    assert "0.91" in publish_result.message
+
+
+def test_publish_allows_high_ai_score_when_gate_disabled(monkeypatch):
+    from src.config import Config
+
+    cfg = Config()
+    old_content = dict(cfg._data.get("content", {}))
+    cfg._data.setdefault("content", {})["max_ai_score_for_draft"] = 0
+
+    pipe = ArticleGenerationPipeline(model="mock")
+    pipe.api_client.app_id = "wx"
+    pipe.api_client.app_secret = "secret"
+    pipe.config._data.setdefault("wechat", {})["default_thumb_media_id"] = "thumb_test"
+
+    def fake_create_draft(**kwargs):
+        return "mock_media_high_score"
+
+    monkeypatch.setattr(pipe.api_client, "create_draft", fake_create_draft)
+
+    try:
+        publish_result = asyncio.run(pipe.publish({
+            "id": 0,
+            "title": "title",
+            "content": "<p>x</p>",
+            "digest": "",
+            "ai_score": 0.91,
+            "ai_images": [],
+            "material_images": [],
+            "screenshots": [],
+        }))
+    finally:
+        cfg._data["content"] = old_content
+
+    assert publish_result.ok is True
+    assert publish_result.media_id == "mock_media_high_score"
+
+
 def test_publish_returns_structured_error_when_create_draft_fails(monkeypatch):
     pipe = ArticleGenerationPipeline(model="mock")
     pipe.api_client.app_id = "wx"
