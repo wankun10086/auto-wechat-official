@@ -39,6 +39,7 @@ research:
   material_count: 5
   image_count: 4
   download_images: true
+  allow_no_materials: false
 
 content:
   min_length: 1500

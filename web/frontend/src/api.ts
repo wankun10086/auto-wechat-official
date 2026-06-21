@@ -50,6 +50,24 @@ export interface ArticleDetail {
   media_id: string
   created_at: string
   published_at?: string
+  screenshots: MediaItem[]
+  material_images: MediaItem[]
+  ai_images: MediaItem[]
+  source_urls: string[]
+  research_query: string
+  warnings: string[]
+}
+
+export interface MediaItem {
+  path?: string
+  preview_url?: string
+  url?: string
+  source_url?: string
+  description?: string
+  alt?: string
+  type?: string
+  width?: number
+  height?: number
 }
 
 export interface ModelInfo {

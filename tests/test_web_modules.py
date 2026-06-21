@@ -308,6 +308,44 @@ def test_article_detail_rewrites_mock_images_for_preview():
     assert '/api/media/mock/mock-preview.png' in r.json()["content"]
 
 
+def test_article_detail_returns_research_metadata():
+    from src.db.models import get_session, Article
+
+    media_dir = Path("data/research_images")
+    media_dir.mkdir(parents=True, exist_ok=True)
+    image_path = media_dir / "metadata-preview.png"
+    image_path.write_bytes(b"metadata-image")
+
+    s = get_session()
+    article = Article(
+        title="metadata",
+        final_content="<p>正文</p>",
+        raw_content="raw",
+        status="draft",
+        notes=json.dumps({
+            "source_urls": ["https://example.com/source"],
+            "research_query": "AI Agent 最新 解读 分析",
+            "material_images": [{"path": str(image_path), "description": "素材图"}],
+            "ai_images": [],
+            "screenshots": [],
+            "warnings": ["AI配图生成失败: image quota exhausted"],
+        }, ensure_ascii=False),
+    )
+    s.add(article)
+    s.commit()
+    aid = article.id
+    s.close()
+
+    r = client.get(f"/api/articles/{aid}")
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["source_urls"] == ["https://example.com/source"]
+    assert body["research_query"] == "AI Agent 最新 解读 分析"
+    assert body["warnings"] == ["AI配图生成失败: image quota exhausted"]
+    assert body["material_images"][0]["preview_url"] == "/api/media/research/metadata-preview.png"
+
+
 def test_media_endpoint_rejects_traversal():
     r = client.get("/api/media/research/../articles.db")
 
@@ -353,4 +391,46 @@ def test_module_publish_contract(monkeypatch):
     assert "已存在微信草稿" in r2.json()["message"]
     assert r2.json()["media_id"] == "mock_media_id_001"
     assert r2.json()["code"] == "already_created"
+    assert calls["create_draft"] == 1
+
+
+def test_manual_publish_does_not_require_text_model(monkeypatch):
+    from src.config import Config
+    from src.db.models import get_session, Article
+    from src.wechat.api_client import WeChatAPIClient
+
+    calls = {"create_draft": 0}
+
+    def fake_create_draft(self, **kw):
+        calls["create_draft"] += 1
+        return "mock_media_without_model"
+
+    monkeypatch.setattr(WeChatAPIClient, "create_draft", fake_create_draft)
+
+    cfg = Config()
+    cfg._data.setdefault("ai", {})["provider"] = "deepseek"
+    cfg._data.setdefault("ai", {}).setdefault("deepseek", {})["api_key"] = ""
+    cfg._data.setdefault("wechat", {})["app_id"] = "wx-test"
+    cfg._data.setdefault("wechat", {})["app_secret"] = "secret-test"
+    cfg._data.setdefault("wechat", {})["default_thumb_media_id"] = "thumb_test"
+
+    s = get_session()
+    article = Article(
+        title="manual draft",
+        final_content="<p>正文</p>",
+        raw_content="raw",
+        digest="digest",
+        status="draft",
+    )
+    s.add(article)
+    s.commit()
+    aid = article.id
+    s.close()
+
+    r = client.post(f"/api/articles/{aid}/publish")
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["success"] is True
+    assert body["media_id"] == "mock_media_without_model"
     assert calls["create_draft"] == 1

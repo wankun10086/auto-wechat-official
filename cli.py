@@ -1,5 +1,6 @@
 import asyncio
 import argparse
+import json
 import sys
 from pathlib import Path
 from src.config import Config, setup_logging
@@ -75,6 +76,9 @@ def build_parser():
 
     # list 命令
     subparsers.add_parser("list", help="查看文章列表")
+
+    draft_parser = subparsers.add_parser("draft", help="将已保存文章创建为微信草稿")
+    draft_parser.add_argument("id", type=int, help="文章ID")
 
     # topics 命令
     subparsers.add_parser("topics", help="采集热点话题")
@@ -194,6 +198,9 @@ async def cmd_from_topic(args):
     print(f"  AI味得分: {result['ai_score']:.2f}")
     print(f"  素材配图: {len(result.get('material_images', []))}")
     print(f"  AI配图: {len(result.get('ai_images', []))}")
+    if result.get("research_query"):
+        print(f"  检索词: {result['research_query']}")
+    _print_sources(result)
     _print_warnings(result)
 
     if args.output:
@@ -233,6 +240,42 @@ def cmd_list():
         print(f"  {status_icon} [{a.id}] {a.title}")
         print(f"     状态: {a.status} | AI味: {a.ai_score or 0:.2f} | 创建: {a.created_at.strftime('%m-%d %H:%M')}")
     session.close()
+
+
+async def cmd_draft(args):
+    from src.db.models import get_session, Article
+    from src.pipeline import ArticleGenerationPipeline
+
+    if not _ensure_ready_for_draft():
+        return
+
+    session = get_session()
+    article = session.query(Article).get(args.id)
+    if not article:
+        session.close()
+        print(f"文章不存在: {args.id}")
+        return
+    if article.status == "draft_created" and article.media_id:
+        media_id = article.media_id
+        session.close()
+        print(f"已存在微信草稿: {media_id}")
+        return
+
+    result = {
+        "id": article.id,
+        "title": article.title,
+        "content": article.final_content,
+        "digest": article.digest or "",
+    }
+    result.update(_article_publish_metadata(article))
+    session.close()
+
+    pipeline = ArticleGenerationPipeline(init_provider=False)
+    pub_result = await pipeline.publish(result)
+    if pub_result:
+        print(_format_publish_success(pub_result))
+    else:
+        print(f"草稿创建失败: {_publish_message(pub_result)}")
 
 
 async def cmd_topics():
@@ -297,6 +340,21 @@ def _ensure_ready_for_publish(model: str | None) -> bool:
     return False
 
 
+def _ensure_ready_for_draft() -> bool:
+    from src.readiness import collect_readiness, readiness_ok
+
+    checks = collect_readiness(publish=True, check_model=False, check_research=False)
+    if readiness_ok(checks):
+        return True
+
+    print("\n草稿创建前置检查未通过：")
+    for item in checks:
+        if not item.ok and item.severity != "warning":
+            print(f"  - {item.message}")
+    print("可运行 `python cli.py doctor --publish` 查看完整检查。")
+    return False
+
+
 def _publish_message(result) -> str:
     return getattr(result, "message", "") or "推送失败"
 
@@ -311,9 +369,35 @@ def _pipeline_error(pipeline) -> str:
     return getattr(pipeline, "last_error", "") or "未知错误"
 
 
+def _print_sources(result: dict) -> None:
+    urls = result.get("source_urls", []) or []
+    if not urls:
+        return
+    print("  检索来源:")
+    for idx, url in enumerate(urls[:5], 1):
+        print(f"    {idx}. {url}")
+
+
 def _print_warnings(result: dict) -> None:
     for warning in result.get("warnings", []) or []:
         print(f"  注意: {warning}")
+
+
+def _article_publish_metadata(article) -> dict:
+    metadata = _article_notes(article)
+    return {
+        "screenshots": metadata.get("screenshots", []) or [],
+        "material_images": metadata.get("material_images", []) or [],
+        "ai_images": metadata.get("ai_images", []) or [],
+    }
+
+
+def _article_notes(article) -> dict:
+    try:
+        data = json.loads(article.notes or "{}")
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
 def main():
@@ -338,6 +422,8 @@ def main():
         asyncio.run(cmd_login())
     elif args.command == "list":
         cmd_list()
+    elif args.command == "draft":
+        asyncio.run(cmd_draft(args))
     elif args.command == "topics":
         asyncio.run(cmd_topics())
     elif args.command == "models":

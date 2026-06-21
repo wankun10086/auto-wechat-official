@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { publishArticle } from '../api'
-import type { ArticleDetail } from '../api'
+import type { ArticleDetail, MediaItem } from '../api'
 
 interface Props {
   article: ArticleDetail
@@ -32,6 +32,12 @@ export default function ArticlePreview({ article, onBack, onPublished }: Props) 
     try { return new Date(s).toLocaleString('zh-CN') } catch { return s }
   }
 
+  const mediaItems = [
+    ...((article.material_images || []).map(item => ({ ...item, group: '素材图' }))),
+    ...((article.ai_images || []).map(item => ({ ...item, group: 'AI配图' }))),
+    ...((article.screenshots || []).map(item => ({ ...item, group: '截图' }))),
+  ]
+
   return (
     <div className="article-preview">
       <button className="back-btn" onClick={onBack}>
@@ -60,6 +66,42 @@ export default function ArticlePreview({ article, onBack, onPublished }: Props) 
         <div className="preview-digest">{article.digest}</div>
       )}
 
+      {(article.source_urls?.length || mediaItems.length || article.warnings?.length) ? (
+        <div className="preview-evidence">
+          {article.warnings?.length ? (
+            <div className="evidence-warnings">
+              {article.warnings.map((warning, idx) => (
+                <span key={`${warning}-${idx}`}>{warning}</span>
+              ))}
+            </div>
+          ) : null}
+
+          {article.source_urls?.length ? (
+            <div className="evidence-block">
+              <div className="evidence-title">检索来源</div>
+              <div className="source-list">
+                {article.source_urls.slice(0, 8).map((url, idx) => (
+                  <a key={`${url}-${idx}`} href={url} target="_blank" rel="noreferrer">
+                    {idx + 1}. {shortUrl(url)}
+                  </a>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {mediaItems.length ? (
+            <div className="evidence-block">
+              <div className="evidence-title">配图素材</div>
+              <div className="media-strip">
+                {mediaItems.slice(0, 8).map((item, idx) => (
+                  <MediaThumb key={`${item.path || item.url || idx}-${idx}`} item={item} />
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
       <div
         className="preview-body"
         dangerouslySetInnerHTML={{ __html: article.content }}
@@ -85,4 +127,28 @@ export default function ArticlePreview({ article, onBack, onPublished }: Props) 
       </div>
     </div>
   )
+}
+
+function MediaThumb({ item }: { item: MediaItem & { group?: string } }) {
+  const src = item.preview_url || item.url || ''
+  const label = item.description || item.alt || item.group || '配图'
+  return (
+    <div className="media-thumb">
+      {src ? <img src={src} alt={label} /> : <div className="media-thumb-fallback" />}
+      <div>
+        <span>{item.group || '配图'}</span>
+        <strong>{label}</strong>
+      </div>
+    </div>
+  )
+}
+
+function shortUrl(url: string) {
+  try {
+    const parsed = new URL(url)
+    const path = parsed.pathname === '/' ? '' : parsed.pathname
+    return `${parsed.hostname}${path}`.slice(0, 72)
+  } catch {
+    return url.slice(0, 72)
+  }
 }

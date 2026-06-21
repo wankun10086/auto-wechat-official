@@ -283,6 +283,7 @@ async def get_article(article_id: int):
     if not a:
         session.close()
         raise HTTPException(status_code=404, detail="文章不存在")
+    metadata = _article_metadata(a)
     result = ArticleDetail(
         id=a.id,
         title=a.title or "",
@@ -296,8 +297,12 @@ async def get_article(article_id: int):
         media_id=a.media_id or "",
         created_at=a.created_at.strftime("%Y-%m-%d %H:%M") if a.created_at else "",
         published_at=a.published_at.strftime("%Y-%m-%d %H:%M") if a.published_at else None,
-        screenshots=[],
-        ai_images=[],
+        screenshots=_preview_media_items(metadata.get("screenshots", [])),
+        material_images=_preview_media_items(metadata.get("material_images", [])),
+        ai_images=_preview_media_items(metadata.get("ai_images", [])),
+        source_urls=metadata.get("source_urls", []),
+        research_query=metadata.get("research_query", ""),
+        warnings=metadata.get("warnings", []),
     )
     session.close()
     return result
@@ -326,6 +331,7 @@ async def publish_article(article_id: int):
         "content": a.final_content,
         "digest": a.digest or "",
     }
+    result.update(_publish_metadata(a))
     session.close()
 
     checks = collect_readiness(publish=True, check_model=False, check_research=False)
@@ -346,7 +352,7 @@ async def publish_article(article_id: int):
 
 async def _publish_inner(article_id: int, result: dict):
     try:
-        pipeline = ArticleGenerationPipeline()
+        pipeline = ArticleGenerationPipeline(init_provider=False)
         publish_result = await pipeline.publish(result)
         if publish_result:
             session2 = get_session()
@@ -518,6 +524,36 @@ def _with_result_warnings(message: str, result: dict) -> str:
     if not warnings:
         return message
     return f"{message}；注意：{'；'.join(warnings[:3])}"
+
+
+def _article_metadata(article: Article) -> dict:
+    try:
+        data = json.loads(article.notes or "{}")
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _publish_metadata(article: Article) -> dict:
+    metadata = _article_metadata(article)
+    return {
+        "screenshots": metadata.get("screenshots", []) or [],
+        "material_images": metadata.get("material_images", []) or [],
+        "ai_images": metadata.get("ai_images", []) or [],
+    }
+
+
+def _preview_media_items(items: list) -> list:
+    result = []
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        enriched = dict(item)
+        media_url = _media_url_for_local_path(enriched.get("path", ""))
+        if media_url:
+            enriched["preview_url"] = media_url
+        result.append(enriched)
+    return result
 
 
 def _preview_article_content(content: str) -> str:

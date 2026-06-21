@@ -1,8 +1,10 @@
 import asyncio
+import json
 from pathlib import Path
 
 from src.content.fetcher import ContentResult
 from src.content.researcher import ResearchImage, ResearchResult, TopicResearcher
+from src.db.models import Article, get_session
 from src.pipeline import ArticleGenerationPipeline
 from src.wechat.api_client import WeChatAPIClient
 
@@ -48,7 +50,37 @@ def test_topic_pipeline_runs_offline_with_mocked_research(local_tmp, monkeypatch
     assert result["source_type"] == "topic"
     assert result["material_images"]
     assert result["ai_images"]
+    assert "参考来源" in result["content"]
+    assert "https://example.com/source" in result["content"]
     assert "AI Agent 产品趋势" in result["content"] or result["title"]
+
+    session = get_session()
+    article = session.query(Article).get(result["id"])
+    notes = json.loads(article.notes)
+    session.close()
+
+    assert notes["source_type"] == "topic"
+    assert notes["source_urls"] == ["https://example.com/source"]
+    assert notes["material_images"][0]["path"] == str(image_path)
+    assert notes["ai_images"]
+
+
+def test_topic_pipeline_fails_without_researched_materials(monkeypatch):
+    async def fake_research(self, topic):
+        return ResearchResult(topic=topic, query=f"{topic} latest", sources=[], images=[])
+
+    monkeypatch.setattr(TopicResearcher, "research", fake_research)
+
+    pipe = ArticleGenerationPipeline(model="mock")
+    result = asyncio.run(pipe.run(
+        source="没有素材的议题",
+        source_type="topic",
+        style="tech_explanation",
+        generate_images=False,
+    ))
+
+    assert result is None
+    assert "议题检索未获得可用网页素材" in pipe.last_error
 
 
 def test_pipeline_run_exposes_last_error(monkeypatch):

@@ -1,4 +1,5 @@
 import html as html_lib
+import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -30,9 +31,9 @@ class PublishResult:
 
 
 class ArticleGenerationPipeline:
-    def __init__(self, model: str = None):
+    def __init__(self, model: str = None, init_provider: bool = True):
         self.config = Config()
-        self.provider = get_provider(model)
+        self.provider = get_provider(model) if init_provider else None
         self.fetcher = ContentFetcher()
         self.template = ArticleTemplate()
         self.prompts = load_prompt("tech_article")
@@ -70,6 +71,10 @@ class ArticleGenerationPipeline:
                 self.last_error = "内容抓取失败：未获得可用素材"
                 logger.error(self.last_error)
                 return None
+            if source_type == "topic" and not self._topic_has_materials(content_result):
+                self.last_error = "内容抓取失败：议题检索未获得可用网页素材"
+                logger.error(self.last_error)
+                return None
 
             logger.info(f"内容抓取成功: {content_result.title} ({len(content_result.text_content)} 字)")
 
@@ -88,6 +93,8 @@ class ArticleGenerationPipeline:
 
             if screenshots:
                 final_content = self._embed_images(final_content, screenshots)
+
+            final_content = self._append_reference_sources(final_content, content_result)
 
             material_images = []
             ai_images = []
@@ -111,6 +118,14 @@ class ArticleGenerationPipeline:
             digest = self._generate_digest(final_content)
 
             stage = "数据库保存"
+            result_metadata = self._result_metadata(
+                content_result,
+                source_type,
+                screenshots,
+                material_images,
+                ai_images,
+            )
+
             article_record = Article(
                 title=title,
                 raw_content=raw_content,
@@ -121,6 +136,7 @@ class ArticleGenerationPipeline:
                 topic_strategy=style,
                 ai_score=ai_score,
                 status="draft",
+                notes=json.dumps(result_metadata, ensure_ascii=False),
             )
             session.add(article_record)
             session.commit()
@@ -137,6 +153,8 @@ class ArticleGenerationPipeline:
                 "ai_images": ai_images,
                 "source_type": source_type,
                 "warnings": list(self.warnings),
+                "source_urls": result_metadata["source_urls"],
+                "research_query": result_metadata["research_query"],
             }
 
         except Exception as e:
@@ -201,6 +219,13 @@ class ArticleGenerationPipeline:
             research = await researcher.research(source)
             return research.to_content_result()
         return await self.fetcher.fetch(source)
+
+    def _topic_has_materials(self, content_result: ContentResult) -> bool:
+        if content_result.source_type != "topic":
+            return True
+        if self.config.get("research", "allow_no_materials", default=False):
+            return True
+        return bool(content_result.metadata.get("source_urls"))
 
     async def _take_screenshots(self, url: str, targets: list) -> list:
         capture = ScreenshotCapture()
@@ -298,6 +323,44 @@ class ArticleGenerationPipeline:
     def _add_warning(self, message: str) -> None:
         if message and message not in self.warnings:
             self.warnings.append(message)
+
+    def _append_reference_sources(self, article_html: str, content_result: ContentResult) -> str:
+        urls = content_result.metadata.get("source_urls") or []
+        if not urls:
+            return article_html
+
+        items = []
+        for idx, url in enumerate(urls[:8], 1):
+            safe_url = html_lib.escape(url, quote=True)
+            items.append(f'<li><a href="{safe_url}">{idx}. {safe_url}</a></li>')
+        return (
+            f"{article_html}\n"
+            '<section class="reference-sources">'
+            "<h2>参考来源</h2>"
+            f"<ul>{''.join(items)}</ul>"
+            "</section>"
+        )
+
+    def _result_metadata(
+        self,
+        content_result: ContentResult,
+        source_type: str,
+        screenshots: list,
+        material_images: list,
+        ai_images: list,
+    ) -> dict:
+        source_urls = content_result.metadata.get("source_urls") or []
+        if not source_urls and content_result.url:
+            source_urls = [content_result.url]
+        return {
+            "source_type": source_type,
+            "research_query": content_result.metadata.get("query", ""),
+            "source_urls": source_urls,
+            "screenshots": screenshots,
+            "material_images": material_images,
+            "ai_images": ai_images,
+            "warnings": list(self.warnings),
+        }
 
     def _embed_images(self, article_html: str, images: list) -> str:
         for img in images:

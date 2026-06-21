@@ -50,8 +50,11 @@ export default function App() {
   }
 
   const handlePublished = () => {
-    addToast('success', '发布成功')
+    addToast('success', '草稿创建成功')
     setRefreshKey(k => k + 1)
+    if (activeArticle) {
+      getArticle(activeArticle.id).then(setActiveArticle).catch(() => {})
+    }
   }
 
   const availableModels = models.filter(m => m.has_key).length

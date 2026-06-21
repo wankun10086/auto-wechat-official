@@ -1,6 +1,6 @@
 from typing import Literal, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class GenerateRequest(BaseModel):
@@ -58,7 +58,11 @@ class ArticleDetail(BaseModel):
     created_at: str
     published_at: Optional[str]
     screenshots: list
+    material_images: list
     ai_images: list
+    source_urls: list[str] = Field(default_factory=list)
+    research_query: str = ""
+    warnings: list[str] = Field(default_factory=list)
 
 
 class ModelInfo(BaseModel):

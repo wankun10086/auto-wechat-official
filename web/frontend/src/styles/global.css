@@ -278,6 +278,23 @@ body {
 .model-card .model-name { font-size: 13px; font-weight: 600; color: var(--text); }
 .model-card .model-status { font-size: 11px; color: var(--text-3); margin-top: 3px; }
 .model-card .model-status.available { color: var(--success); }
+.model-card .model-cap {
+  display: inline-flex;
+  margin-top: 7px;
+  padding: 2px 7px;
+  border-radius: var(--r-pill);
+  background: rgba(24, 23, 21, 0.06);
+  color: var(--text-3);
+  font-size: 10.5px;
+  font-weight: 600;
+}
+.model-card .model-cap.image { background: var(--accent-soft); color: var(--accent); }
+
+.field-hint {
+  margin-top: 7px;
+  font-size: 12.5px;
+  color: var(--text-3);
+}
 
 /* 复选 */
 .checkbox-group { display: flex; flex-wrap: wrap; gap: 10px; }
@@ -421,6 +438,97 @@ body {
   border-left: 3px solid var(--accent);
   padding: 12px 16px; border-radius: 0 8px 8px 0;
   margin-bottom: 18px; font-size: 14px; color: var(--text-2); line-height: 1.7;
+}
+
+.preview-evidence {
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-card);
+  padding: 12px;
+  margin: 0 0 18px;
+  background: var(--surface);
+}
+
+.evidence-block + .evidence-block { margin-top: 12px; }
+
+.evidence-title {
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--text-2);
+  margin-bottom: 8px;
+}
+
+.evidence-warnings {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-bottom: 12px;
+}
+
+.evidence-warnings span {
+  font-size: 12.5px;
+  color: var(--warning);
+  background: rgba(201, 122, 26, 0.1);
+  border: 1px solid rgba(201, 122, 26, 0.18);
+  border-radius: var(--r-control);
+  padding: 7px 9px;
+}
+
+.source-list {
+  display: grid;
+  gap: 6px;
+}
+
+.source-list a {
+  color: var(--accent);
+  font-size: 12.5px;
+  line-height: 1.45;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.source-list a:hover { text-decoration: underline; }
+
+.media-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(138px, 1fr));
+  gap: 10px;
+}
+
+.media-thumb {
+  display: grid;
+  grid-template-columns: 54px 1fr;
+  gap: 9px;
+  align-items: center;
+  min-width: 0;
+}
+
+.media-thumb img,
+.media-thumb-fallback {
+  width: 54px;
+  height: 42px;
+  object-fit: cover;
+  border-radius: var(--r-control);
+  border: 1px solid var(--hairline);
+  background: var(--surface-2);
+}
+
+.media-thumb span {
+  display: block;
+  color: var(--text-3);
+  font-size: 11px;
+  margin-bottom: 2px;
+}
+
+.media-thumb strong {
+  display: block;
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.35;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
 
 .preview-body { font-size: 15.5px; line-height: 1.8; color: var(--text); }

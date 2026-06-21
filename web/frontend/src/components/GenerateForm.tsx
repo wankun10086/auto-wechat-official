@@ -41,6 +41,7 @@ export default function GenerateForm({ models, onGenerated, onError }: Props) {
   const [loading, setLoading] = useState(false)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const selectedModelInfo = models.find(m => m.name === selectedModel) || models.find(m => m.is_current)
 
   const handleScreenshotToggle = (val: string) => {
     setScreenshot(prev => {
@@ -209,6 +210,9 @@ export default function GenerateForm({ models, onGenerated, onError }: Props) {
                 <div className={`model-status ${m.is_ready ? 'available' : ''}`}>
                   {m.is_current ? '当前使用' : m.is_ready ? '可用' : m.has_key ? '配置不完整' : '未配置'}
                 </div>
+                <div className={`model-cap ${m.supports_image ? 'image' : ''}`}>
+                  {m.supports_image ? 'AI配图' : '文本'}
+                </div>
               </div>
             ))
           )}
@@ -258,6 +262,9 @@ export default function GenerateForm({ models, onGenerated, onError }: Props) {
           <input type="checkbox" checked={noImages} onChange={e => setNoImages(e.target.checked)} />
           不包含图片
         </label>
+        {!noImages && selectedModelInfo && !selectedModelInfo.supports_image && (
+          <div className="field-hint">当前模型只生成正文；素材图片仍会检索，AI配图请选 MiniMax 或 GLM。</div>
+        )}
       </div>
 
       <div className="btn-group">
