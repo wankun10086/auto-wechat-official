@@ -7,7 +7,7 @@ wechat:
   default_thumb_media_id: "your-thumb-media-id"
 
 ai:
-  provider: deepseek            # deepseek | kimi | minimax
+  provider: deepseek            # deepseek | kimi | minimax | glm
   deepseek:
     api_key: "sk-your-deepseek-key"
     base_url: https://api.deepseek.com
@@ -20,9 +20,24 @@ ai:
     api_key: "sk-your-minimax-key"
     base_url: https://api.minimaxi.com/anthropic
     model: MiniMax-M3
-    image_model: MiniMax-M3
+    image_base_url: https://api.minimax.io
+    image_model: image-01
+  glm:
+    api_key: "your-zhipu-api-key"
+    base_url: https://open.bigmodel.cn/api/paas/v4
+    model: glm-4-flash
+    image_model: glm-image
+    image_size: 1280x1280
   temperature: 0.85
   max_tokens: 4000
+
+research:
+  search_provider: duckduckgo   # duckduckgo | bing | serper
+  serper_api_key: ""
+  query_suffix: "最新 解读 分析"
+  material_count: 5
+  image_count: 4
+  download_images: true
 
 content:
   min_length: 1500

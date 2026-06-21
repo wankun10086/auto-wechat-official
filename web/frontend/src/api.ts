@@ -2,7 +2,8 @@ const BASE = ''
 
 export interface GenerateParams {
   url: string
-  source_type?: 'url' | 'file'
+  topic?: string
+  source_type?: 'url' | 'file' | 'topic'
   model?: string
   style: string
   prompt: string
@@ -122,6 +123,7 @@ export interface SettingsData {
     deepseek: { api_key?: string; base_url?: string; model?: string }
     kimi: { api_key?: string; base_url?: string; model?: string }
     minimax: { api_key?: string; base_url?: string; model?: string; image_model?: string }
+    glm: { api_key?: string; base_url?: string; model?: string; image_model?: string; image_size?: string }
     temperature: number
     max_tokens: number
   }

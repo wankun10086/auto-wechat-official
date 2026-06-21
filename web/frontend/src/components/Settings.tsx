@@ -104,6 +104,7 @@ export default function Settings({ onBack, onSaved, onError }: Props) {
                 <option value="deepseek">DeepSeek</option>
                 <option value="kimi">Kimi</option>
                 <option value="minimax">MiniMax</option>
+                <option value="glm">GLM</option>
               </select>
             </div>
             <div className="form-row">
@@ -183,6 +184,36 @@ export default function Settings({ onBack, onSaved, onError }: Props) {
               <label>图片模型</label>
               <input className="input" value={settings.ai.minimax.image_model || ''} onChange={e => updateAi('minimax', 'image_model', e.target.value)} />
               <div className="hint">用于AI配图生成，如 image-01</div>
+            </div>
+          </div>
+          <div className="settings-group">
+            <h3>
+              GLM
+              {settings.ai.provider === 'glm' && <span className="current-badge">当前使用</span>}
+            </h3>
+            <div className="form-group">
+              <label>API Key</label>
+              <input className="input" type="password" placeholder="输入智谱 API Key" value={settings.ai.glm?.api_key || ''} onChange={e => updateAi('glm', 'api_key', e.target.value)} />
+            </div>
+            <div className="form-row">
+              <div className="form-group" style={{ flex: 1 }}>
+                <label>Base URL</label>
+                <input className="input" value={settings.ai.glm?.base_url || ''} onChange={e => updateAi('glm', 'base_url', e.target.value)} />
+              </div>
+              <div className="form-group" style={{ flex: 1 }}>
+                <label>文本模型</label>
+                <input className="input" value={settings.ai.glm?.model || ''} onChange={e => updateAi('glm', 'model', e.target.value)} />
+              </div>
+            </div>
+            <div className="form-row">
+              <div className="form-group" style={{ flex: 1 }}>
+                <label>图片模型</label>
+                <input className="input" value={settings.ai.glm?.image_model || ''} onChange={e => updateAi('glm', 'image_model', e.target.value)} />
+              </div>
+              <div className="form-group" style={{ flex: 1 }}>
+                <label>图片尺寸</label>
+                <input className="input" value={settings.ai.glm?.image_size || ''} onChange={e => updateAi('glm', 'image_size', e.target.value)} />
+              </div>
             </div>
           </div>
         </div>

@@ -11,13 +11,13 @@ const STYLES = [
 
 const SCREENSHOT_OPTIONS = [
   { value: 'code', label: '代码块' },
-  { value: 'chart', label: '图表' },
-  { value: 'table', label: '表格' },
-  { value: 'image', label: '图片' },
+  { value: 'charts', label: '图表' },
+  { value: 'tables', label: '表格' },
+  { value: 'images', label: '图片' },
   { value: 'fullpage', label: '全页面' },
 ]
 
-type SourceType = 'url' | 'file'
+type SourceType = 'url' | 'file' | 'topic'
 
 interface Props {
   models: ModelInfo[]
@@ -28,6 +28,7 @@ interface Props {
 export default function GenerateForm({ models, onGenerated, onError }: Props) {
   const [sourceType, setSourceType] = useState<SourceType>('url')
   const [url, setUrl] = useState('')
+  const [topic, setTopic] = useState('')
   const [uploaded, setUploaded] = useState<UploadResult | null>(null)
   const [uploading, setUploading] = useState(false)
   const [dragging, setDragging] = useState(false)
@@ -65,16 +66,20 @@ export default function GenerateForm({ models, onGenerated, onError }: Props) {
 
   const canSubmit = () => {
     if (loading || uploading) return false
-    return sourceType === 'url' ? !!url.trim() : !!uploaded
+    if (sourceType === 'url') return !!url.trim()
+    if (sourceType === 'topic') return !!topic.trim()
+    return !!uploaded
   }
 
   const handleSubmit = async (shouldPublish: boolean) => {
     if (sourceType === 'url' && !url.trim()) { onError('请输入链接地址'); return }
     if (sourceType === 'file' && !uploaded) { onError('请先上传文件'); return }
+    if (sourceType === 'topic' && !topic.trim()) { onError('请输入议题'); return }
     setLoading(true)
     try {
       const params: GenerateParams = {
-        url: sourceType === 'url' ? url.trim() : uploaded!.path,
+        url: sourceType === 'file' ? uploaded!.path : url.trim(),
+        topic: topic.trim(),
         source_type: sourceType,
         model: selectedModel || undefined,
         style,
@@ -94,7 +99,7 @@ export default function GenerateForm({ models, onGenerated, onError }: Props) {
 
   const switchSource = (t: SourceType) => {
     setSourceType(t)
-    if (t === 'url') setScreenshot('')
+    if (t !== 'url') setScreenshot('')
   }
 
   return (
@@ -114,6 +119,11 @@ export default function GenerateForm({ models, onGenerated, onError }: Props) {
             className={`seg ${sourceType === 'file' ? 'active' : ''}`}
             onClick={() => switchSource('file')}
           >本地文件</button>
+          <button
+            type="button"
+            className={`seg ${sourceType === 'topic' ? 'active' : ''}`}
+            onClick={() => switchSource('topic')}
+          >议题</button>
         </div>
       </div>
 
@@ -128,7 +138,7 @@ export default function GenerateForm({ models, onGenerated, onError }: Props) {
             onChange={e => setUrl(e.target.value)}
           />
         </div>
-      ) : (
+      ) : sourceType === 'file' ? (
         <div className="form-group">
           <label>本地文件</label>
           <div
@@ -164,6 +174,17 @@ export default function GenerateForm({ models, onGenerated, onError }: Props) {
               <div className="dropzone-hint">点击或拖入文件 · 支持 .md .txt .html</div>
             )}
           </div>
+        </div>
+      ) : (
+        <div className="form-group">
+          <label>议题</label>
+          <textarea
+            className="textarea"
+            placeholder="输入一个议题，例如：AI Agent 产品趋势、GLM 新模型解读、微信生态自动化"
+            value={topic}
+            onChange={e => setTopic(e.target.value)}
+            rows={3}
+          />
         </div>
       )}
 
@@ -253,7 +274,7 @@ export default function GenerateForm({ models, onGenerated, onError }: Props) {
           onClick={() => handleSubmit(true)}
           disabled={!canSubmit()}
         >
-          生成并发布
+          生成并推送到草稿箱
         </button>
       </div>
     </div>

@@ -1,15 +1,18 @@
+import html as html_lib
 import re
 from pathlib import Path
-from datetime import datetime
+
 from loguru import logger
-from src.config import Config, load_prompt
+
 from src.ai.provider import get_provider
+from src.config import Config, load_prompt
 from src.content.fetcher import ContentFetcher, ContentResult
-from src.content.screenshot import ScreenshotCapture
 from src.content.humanizer import Humanizer
+from src.content.researcher import TopicResearcher
+from src.content.screenshot import ScreenshotCapture
 from src.content.template import ArticleTemplate
+from src.db.models import Article, get_session
 from src.wechat.api_client import WeChatAPIClient
-from src.db.models import get_session, Article
 
 
 class ArticleGenerationPipeline:
@@ -25,11 +28,18 @@ class ArticleGenerationPipeline:
         self.author = wechat_cfg.get("author", "")
         self.db_path = self.config.get("database", "path", default="data/articles.db")
 
-    async def run(self, source: str, source_type: str = "url", style: str = "tech_explanation",
-                  extra_prompt: str = "", screenshot_targets: list = None,
-                  generate_images: bool = True) -> dict:
+    async def run(
+        self,
+        source: str,
+        source_type: str = "url",
+        style: str = "tech_explanation",
+        extra_prompt: str = "",
+        screenshot_targets: list = None,
+        generate_images: bool = True,
+    ) -> dict:
         session = get_session(self.db_path)
         article_record = None
+        source_type = (source_type or "url").lower()
 
         try:
             content_result = await self._fetch_content(source, source_type)
@@ -52,15 +62,20 @@ class ArticleGenerationPipeline:
             if screenshots:
                 final_content = self._embed_images(final_content, screenshots)
 
+            material_images = []
             ai_images = []
             if generate_images:
+                material_images = self._material_images(content_result)
+                if material_images:
+                    final_content = self._embed_images(final_content, material_images)
+
                 ai_images = await self._generate_ai_images(content_result, final_content)
                 if ai_images:
                     final_content = self._embed_images(final_content, ai_images)
 
             final_content = self.template.wrap_article(final_content)
 
-            titles = self._generate_titles(content_result, final_content)
+            titles = self._generate_titles(final_content)
             title = titles[0] if titles else content_result.title
             digest = self._generate_digest(final_content)
 
@@ -86,6 +101,7 @@ class ArticleGenerationPipeline:
                 "digest": digest,
                 "ai_score": ai_score,
                 "screenshots": screenshots,
+                "material_images": material_images,
                 "ai_images": ai_images,
                 "source_type": source_type,
             }
@@ -102,9 +118,9 @@ class ArticleGenerationPipeline:
     async def publish(self, result: dict) -> bool:
         session = get_session(self.db_path)
         try:
-            thumb_media_id = self.config.get("wechat", "default_thumb_media_id", default="")
+            thumb_media_id = self._resolve_thumb_media_id(result)
             if not thumb_media_id:
-                logger.warning("未配置默认封面图 thumb_media_id")
+                logger.warning("未配置默认封面图 thumb_media_id，且没有可上传的本地图片")
                 return False
 
             media_id = self.api_client.create_draft(
@@ -118,6 +134,7 @@ class ArticleGenerationPipeline:
             article = session.query(Article).get(result["id"])
             if article:
                 article.media_id = media_id
+                article.thumb_media_id = thumb_media_id
                 article.status = "draft_created"
                 session.commit()
 
@@ -132,15 +149,17 @@ class ArticleGenerationPipeline:
     async def _fetch_content(self, source: str, source_type: str):
         if source_type == "file":
             return await self.fetcher.fetch_file(source)
-        else:
-            return await self.fetcher.fetch(source)
+        if source_type == "topic":
+            researcher = TopicResearcher(self.fetcher)
+            research = await researcher.research(source)
+            return research.to_content_result()
+        return await self.fetcher.fetch(source)
 
     async def _take_screenshots(self, url: str, targets: list) -> list:
         capture = ScreenshotCapture()
         try:
             await capture.start()
-            results = await capture.capture_url(url, targets)
-            return results
+            return await capture.capture_url(url, targets)
         except Exception as e:
             logger.error(f"截图失败: {e}")
             return []
@@ -156,30 +175,42 @@ class ArticleGenerationPipeline:
         }
         template_key = style_map.get(style, "article_generation")
         prompt_template = self.prompts.get(template_key, self.prompts.get("article_generation", ""))
-        source_text = content_result.text_content[:6000]
 
         prompt = prompt_template.format(
             topic=content_result.title,
-            source_materials=source_text,
+            source_materials=content_result.text_content[:9000],
         )
 
         if extra_prompt:
             prompt += f"\n\n【额外要求】{extra_prompt}"
 
         if content_result.source_type == "github":
-            prompt += f"\n\n【补充信息】这是一个GitHub仓库。仓库描述：{content_result.metadata.get('description', '')}。主要语言：{content_result.metadata.get('language', '')}。Star数：{content_result.metadata.get('stars', '')}。"
+            prompt += (
+                "\n\n【补充信息】这是一个GitHub仓库。"
+                f"仓库描述：{content_result.metadata.get('description', '')}。"
+                f"主要语言：{content_result.metadata.get('language', '')}。"
+                f"Star数：{content_result.metadata.get('stars', '')}。"
+            )
         elif content_result.source_type == "web":
             prompt += f"\n\n【补充信息】源链接：{content_result.url}"
+        elif content_result.source_type == "topic":
+            urls = content_result.metadata.get("source_urls", [])
+            if urls:
+                prompt += "\n\n【检索来源】\n" + "\n".join(f"- {url}" for url in urls[:8])
+            prompt += "\n\n请基于检索素材写作，避免编造来源；如果素材之间存在冲突，请在文中用审慎语气处理。"
 
-        prompt += "\n\n请用HTML格式输出，使用 <h2> <h3> <p> <blockquote> <strong> <em> <ul> <li> <code> <pre> 等标签。文章中如果有代码示例，请用 <pre><code> 包裹。"
+        prompt += (
+            "\n\n请用HTML格式输出，使用 <h2> <h3> <p> <blockquote> <strong> "
+            "<em> <ul> <li> <code> <pre> 等标签。文章中如果有代码示例，"
+            "请用 <pre><code> 包裹。"
+        )
 
         result = self.provider.generate(prompt, temperature=0.85, max_tokens=6000)
         return self._extract_html(result.text)
 
-    def _generate_titles(self, content_result: ContentResult, article: str) -> list:
+    def _generate_titles(self, article: str) -> list:
         prompt_template = self.prompts.get("title_generation", "")
-        summary = article[:1500]
-        prompt = prompt_template.format(summary=summary)
+        prompt = prompt_template.format(summary=article[:1500])
         result = self.provider.generate(prompt, temperature=0.9, max_tokens=500)
 
         titles = []
@@ -199,7 +230,11 @@ class ArticleGenerationPipeline:
 
     async def _generate_ai_images(self, content_result: ContentResult, article: str) -> list:
         try:
-            image_prompt = f"为以下公众号文章生成一张封面配图，风格简洁现代，科技感：{content_result.title}"
+            image_prompt = (
+                "为微信公众号文章生成一张原创封面配图，中文科技媒体风格，"
+                "现代、清晰、不要文字水印、不要品牌商标。"
+                f"文章议题：{content_result.title}。"
+            )
             image_path = self.provider.generate_image(image_prompt)
             return [{"path": image_path, "description": "AI生成配图", "type": "ai_generated"}]
         except NotImplementedError:
@@ -209,14 +244,41 @@ class ArticleGenerationPipeline:
             logger.warning(f"AI配图生成失败: {e}")
             return []
 
-    def _embed_images(self, html: str, images: list) -> str:
+    def _embed_images(self, article_html: str, images: list) -> str:
         for img in images:
             path = img.get("path", "")
             desc = img.get("description", "")
             if path and Path(path).exists():
-                img_tag = f'<figure><img src="{path}" alt="{desc}" style="max-width:100%;"/><figcaption>{desc}</figcaption></figure>'
-                html = img_tag + "\n" + html
-        return html
+                img_tag = (
+                    f'<figure><img src="{html_lib.escape(path)}" alt="{html_lib.escape(desc)}" '
+                    f'style="max-width:100%;"/><figcaption>{html_lib.escape(desc)}</figcaption></figure>'
+                )
+                article_html = img_tag + "\n" + article_html
+        return article_html
+
+    def _material_images(self, content_result: ContentResult) -> list:
+        images = []
+        for img in content_result.images or []:
+            path = img.get("path", "")
+            if path and Path(path).exists():
+                images.append({
+                    "path": path,
+                    "description": img.get("alt") or "素材配图",
+                    "type": "material",
+                })
+        return images[:3]
+
+    def _resolve_thumb_media_id(self, result: dict) -> str:
+        thumb_media_id = self.config.get("wechat", "default_thumb_media_id", default="")
+        if thumb_media_id:
+            return thumb_media_id
+
+        for key in ("ai_images", "material_images", "screenshots"):
+            for image in result.get(key, []) or []:
+                path = image.get("path", "")
+                if path and Path(path).exists():
+                    return self.api_client.upload_thumb_image(path)
+        return ""
 
     def _extract_html(self, text: str) -> str:
         if "```html" in text:
@@ -226,6 +288,3 @@ class ArticleGenerationPipeline:
             text = text.split("```", 1)[1]
             text = text.split("```", 1)[0]
         return text.strip()
-
-
-

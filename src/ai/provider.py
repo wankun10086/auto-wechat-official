@@ -33,12 +33,14 @@ def get_provider(name: str = None) -> BaseProvider:
     provider_config = ai_config.get(provider_name, {})
 
     from src.ai.deepseek import DeepSeekProvider
+    from src.ai.glm import GLMProvider
     from src.ai.kimi import KimiProvider
     from src.ai.minimax import MiniMaxProvider
     from src.ai.mock import MockProvider
 
     providers = {
         "deepseek": DeepSeekProvider,
+        "glm": GLMProvider,
         "kimi": KimiProvider,
         "minimax": MiniMaxProvider,
         "mock": MockProvider,
@@ -50,3 +52,14 @@ def get_provider(name: str = None) -> BaseProvider:
 
     logger.info(f"使用AI模型: {provider_name} / {provider_config.get('model', '')}")
     return cls(provider_config)
+
+
+def list_provider_names(include_mock: bool = False) -> list:
+    names = ["deepseek", "kimi", "minimax", "glm"]
+    if include_mock:
+        names.append("mock")
+    return names
+
+
+def provider_supports_image(name: str) -> bool:
+    return name in {"minimax", "glm", "mock"}

@@ -12,6 +12,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from loguru import logger
 from src.config import Config
+from src.ai.provider import list_provider_names, provider_supports_image
 from src.pipeline import ArticleGenerationPipeline
 from src.db.models import get_session, Article, LogLine
 from web.schemas import (
@@ -115,12 +116,14 @@ async def _run_generation_task_inner(task_id: str, req: GenerateRequest):
     try:
         pipeline = ArticleGenerationPipeline(model=req.model)
         tasks[task_id] = {"status": "running", "progress": 30, "message": "正在生成文章..."}
+        source_type = req.source_type or "url"
+        source = req.topic if source_type == "topic" else req.url
         result = await pipeline.run(
-            source=req.url,
-            source_type=req.source_type or "url",
+            source=source,
+            source_type=source_type,
             style=req.style,
             extra_prompt=req.prompt,
-            screenshot_targets=req.screenshot.split(",") if req.screenshot else [],
+            screenshot_targets=_parse_screenshot_targets(req.screenshot) if source_type == "url" else [],
             generate_images=not req.no_images,
         )
         if not result:
@@ -157,6 +160,16 @@ async def _run_generation_task_inner(task_id: str, req: GenerateRequest):
     except Exception as e:
         logger.error(f"任务失败: {e}")
         tasks[task_id] = {"status": "failed", "progress": 0, "message": str(e)}
+
+
+def _parse_screenshot_targets(value: str) -> list[str]:
+    aliases = {"chart": "charts", "table": "tables", "image": "images"}
+    result = []
+    for item in (value or "").split(","):
+        item = item.strip()
+        if item:
+            result.append(aliases.get(item, item))
+    return result
 
 
 @router.post("/upload")
@@ -306,13 +319,13 @@ async def list_models():
     ai_config = config.ai
     current = ai_config.get("provider", "deepseek")
     result = []
-    for name in ["deepseek", "kimi", "minimax"]:
+    for name in list_provider_names():
         pc = ai_config.get(name, {})
         result.append(ModelInfo(
             name=name,
             model=pc.get("model", ""),
             has_key=bool(pc.get("api_key")),
-            supports_image=(name == "minimax"),
+            supports_image=provider_supports_image(name),
             is_current=(name == current),
         ))
     logger.debug(f"模型列表请求，当前: {current}")
@@ -330,6 +343,7 @@ async def get_settings():
             "deepseek": ai_config.get("deepseek", {}),
             "kimi": ai_config.get("kimi", {}),
             "minimax": ai_config.get("minimax", {}),
+            "glm": ai_config.get("glm", {}),
             "temperature": ai_config.get("temperature", 0.85),
             "max_tokens": ai_config.get("max_tokens", 4000),
         },

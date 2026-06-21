@@ -6,6 +6,9 @@ from src.config import Config, setup_logging
 from loguru import logger
 
 
+AI_MODELS = ["deepseek", "kimi", "minimax", "glm"]
+
+
 def build_parser():
     parser = argparse.ArgumentParser(
         prog="auto-wechat",
@@ -30,7 +33,7 @@ def build_parser():
     # from-url 命令
     url_parser = subparsers.add_parser("from-url", help="从URL生成公众号文章")
     url_parser.add_argument("url", help="目标URL（GitHub仓库、技术文章、文档等）")
-    url_parser.add_argument("--model", "-m", choices=["deepseek", "kimi", "minimax"],
+    url_parser.add_argument("--model", "-m", choices=AI_MODELS,
                             help="指定AI模型（默认使用config中的配置）")
     url_parser.add_argument("--style", "-s", default="tech_explanation",
                             choices=["tech_explanation", "product_review", "industry_analysis", "tutorial"],
@@ -45,7 +48,7 @@ def build_parser():
     # from-file 命令
     file_parser = subparsers.add_parser("from-file", help="从本地文件生成公众号文章")
     file_parser.add_argument("file", help="本地文件路径（.md/.html/.txt）")
-    file_parser.add_argument("--model", "-m", choices=["deepseek", "kimi", "minimax"], help="指定AI模型")
+    file_parser.add_argument("--model", "-m", choices=AI_MODELS, help="指定AI模型")
     file_parser.add_argument("--style", "-s", default="tech_explanation",
                              choices=["tech_explanation", "product_review", "industry_analysis", "tutorial"],
                              help="文章风格")
@@ -54,6 +57,17 @@ def build_parser():
     file_parser.add_argument("--no-images", action="store_true", help="不生成AI配图")
     file_parser.add_argument("--publish", action="store_true", help="生成后直接创建草稿")
     file_parser.add_argument("--output", "-o", help="输出文章HTML到文件")
+
+    topic_parser = subparsers.add_parser("from-topic", help="根据议题自动检索素材并生成公众号文章")
+    topic_parser.add_argument("topic", help="要写作的议题，例如：AI Agent 产品趋势")
+    topic_parser.add_argument("--model", "-m", choices=AI_MODELS, help="指定AI模型")
+    topic_parser.add_argument("--style", "-s", default="tech_explanation",
+                              choices=["tech_explanation", "product_review", "industry_analysis", "tutorial"],
+                              help="文章风格")
+    topic_parser.add_argument("--prompt", "-p", default="", help="额外的写作指令")
+    topic_parser.add_argument("--no-images", action="store_true", help="不生成或嵌入配图")
+    topic_parser.add_argument("--publish", action="store_true", help="生成后直接创建微信草稿")
+    topic_parser.add_argument("--output", "-o", help="输出文章HTML到文件")
 
     # login 命令
     subparsers.add_parser("login", help="微信扫码登录")
@@ -141,6 +155,41 @@ async def cmd_from_file(args):
             print("  草稿创建成功！")
 
 
+async def cmd_from_topic(args):
+    from src.pipeline import ArticleGenerationPipeline
+
+    pipeline = ArticleGenerationPipeline(model=args.model)
+    result = await pipeline.run(
+        source=args.topic,
+        source_type="topic",
+        style=args.style,
+        extra_prompt=args.prompt,
+        screenshot_targets=[],
+        generate_images=not args.no_images,
+    )
+
+    if not result:
+        print("文章生成失败")
+        return
+
+    print("\n文章生成成功：")
+    print(f"  标题: {result['title']}")
+    print(f"  AI味得分: {result['ai_score']:.2f}")
+    print(f"  素材配图: {len(result.get('material_images', []))}")
+    print(f"  AI配图: {len(result.get('ai_images', []))}")
+
+    if args.output:
+        Path(args.output).write_text(result["content"], encoding="utf-8")
+        print(f"  已保存到: {args.output}")
+
+    if args.publish:
+        pub_result = await pipeline.publish(result)
+        if pub_result:
+            print("  草稿创建成功")
+        else:
+            print("  草稿创建失败")
+
+
 async def cmd_login():
     from src.wechat.publisher import WeChatPublisher
     publisher = WeChatPublisher()
@@ -186,7 +235,7 @@ def cmd_models():
 
     print(f"\n当前模型: {current}\n")
     print("可用模型:")
-    for name in ["deepseek", "kimi", "minimax"]:
+    for name in AI_MODELS:
         provider_config = ai_config.get(name, {})
         model = provider_config.get("model", "未配置")
         has_key = "✅" if provider_config.get("api_key") else "❌ 未配置API Key"
@@ -212,6 +261,8 @@ def main():
         asyncio.run(cmd_from_url(args))
     elif args.command == "from-file":
         asyncio.run(cmd_from_file(args))
+    elif args.command == "from-topic":
+        asyncio.run(cmd_from_topic(args))
     elif args.command == "login":
         asyncio.run(cmd_login())
     elif args.command == "list":

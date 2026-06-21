@@ -1,3 +1,8 @@
+import hashlib
+from pathlib import Path
+
+from PIL import Image, ImageDraw
+
 from src.ai.provider import BaseProvider, GenerateResult
 
 
@@ -23,7 +28,20 @@ class MockProvider(BaseProvider):
         return GenerateResult(text=text, usage={"total_tokens": len(text)})
 
     def generate_image(self, prompt: str, **kwargs) -> str:
-        raise NotImplementedError("MockProvider 不支持图片生成")
+        digest = hashlib.sha256((prompt or "mock").encode("utf-8")).hexdigest()[:12]
+        out_dir = Path("data/mock_images")
+        out_dir.mkdir(parents=True, exist_ok=True)
+        path = out_dir / f"{digest}.png"
+        if path.exists():
+            return str(path)
+
+        img = Image.new("RGB", (1280, 720), color=(26, 34, 44))
+        draw = ImageDraw.Draw(img)
+        draw.rectangle((0, 520, 1280, 720), fill=(46, 90, 122))
+        draw.text((64, 72), "Mock article image", fill=(245, 247, 250))
+        draw.text((64, 142), digest, fill=(180, 220, 235))
+        img.save(path)
+        return str(path)
 
     def _respond(self, prompt: str) -> str:
         p = prompt or ""

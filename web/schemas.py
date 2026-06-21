@@ -1,11 +1,12 @@
+from typing import Literal, Optional
+
 from pydantic import BaseModel
-from typing import Optional
-from datetime import datetime
 
 
 class GenerateRequest(BaseModel):
-    url: str                       # URL 或已上传文件的本地路径
-    source_type: str = "url"       # url | file
+    url: str = ""
+    topic: str = ""
+    source_type: Literal["url", "file", "topic"] = "url"
     model: Optional[str] = None
     style: str = "tech_explanation"
     prompt: str = ""
@@ -21,7 +22,7 @@ class GenerateResponse(BaseModel):
 
 class UploadRequest(BaseModel):
     name: str
-    content: str                   # base64 编码的文件内容
+    content: str
 
 
 class TaskStatus(BaseModel):

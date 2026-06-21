@@ -2,6 +2,7 @@ import json as _json
 import re
 import time
 import requests
+from bs4 import BeautifulSoup
 from pathlib import Path
 from loguru import logger
 
@@ -95,8 +96,7 @@ class WeChatAPIClient:
 
     def create_draft(self, title, content, thumb_media_id, author="", digest=""):
         """创建草稿，返回 media_id"""
-        import re as _re
-        content = _re.sub(r'<style>.*?</style>', '', content, flags=_re.DOTALL).strip()
+        content = self._prepare_draft_content(content)
         article = {
             "title": _truncate_bytes(title, 30),
             "content": content,
@@ -110,6 +110,22 @@ class WeChatAPIClient:
         media_id = data.get("media_id")
         logger.info(f"草稿创建成功: {media_id}")
         return media_id
+
+    def _prepare_draft_content(self, content):
+        content = re.sub(r'<style>.*?</style>', '', content or '', flags=re.DOTALL).strip()
+        soup = BeautifulSoup(content, "html.parser")
+        for img in soup.find_all("img"):
+            src = img.get("src", "")
+            if not src or self._is_remote_image(src):
+                continue
+            path = Path(src)
+            if path.exists():
+                img["src"] = self.upload_content_image(str(path))
+        return str(soup)
+
+    def _is_remote_image(self, src):
+        lowered = src.lower()
+        return lowered.startswith("http://") or lowered.startswith("https://") or lowered.startswith("data:")
 
     def get_draft_list(self, offset=0, count=20):
         """获取草稿列表"""
