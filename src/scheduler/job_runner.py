@@ -60,13 +60,13 @@ class ArticlePipeline:
                 logger.warning("流水线未产出文章")
                 return None
 
-            draft_ok = await pipeline.publish(result)
+            publish_result = await pipeline.publish(result)
             self._log_action(
                 session,
                 result["id"],
                 "create_draft",
-                "success" if draft_ok else "failed",
-                None if draft_ok else "draft creation returned false",
+                "success" if publish_result else "failed",
+                None if publish_result else getattr(publish_result, "message", "draft creation returned false"),
             )
 
             article = session.query(Article).get(result["id"])

@@ -108,7 +108,7 @@ export async function getArticle(id: number): Promise<ArticleDetail> {
   return res.json()
 }
 
-export async function publishArticle(id: number): Promise<{success: boolean; message: string}> {
+export async function publishArticle(id: number): Promise<{success: boolean; message: string; media_id?: string; code?: string; thumb_media_id?: string}> {
   const res = await fetch(`${BASE}/api/articles/${id}/publish`, { method: 'POST' })
   return res.json()
 }

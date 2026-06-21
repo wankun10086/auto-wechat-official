@@ -1,6 +1,7 @@
 import asyncio
 
 from src.db.models import Article, HotTopic, PublishLog, get_session
+from src.pipeline import PublishResult
 from src.scheduler import job_runner
 from src.scheduler.job_runner import ArticlePipeline
 
@@ -49,7 +50,7 @@ def test_scheduler_pipeline_reuses_topic_generation_pipeline(monkeypatch):
             article.status = "draft_created"
             session.commit()
             session.close()
-            return True
+            return PublishResult(True, "ok", "草稿创建成功", media_id="mock_media_id", thumb_media_id="thumb")
 
     monkeypatch.setattr(job_runner, "ArticleGenerationPipeline", FakePipeline)
 
@@ -79,6 +80,70 @@ def test_scheduler_pipeline_reuses_topic_generation_pipeline(monkeypatch):
     logs = session.query(PublishLog).filter_by(article_id=result.id).all()
     session.close()
     assert any(log.action == "create_draft" and log.status == "success" for log in logs)
+
+
+def test_scheduler_records_publish_failure_message(monkeypatch):
+    class FakePipeline:
+        def __init__(self):
+            pass
+
+        async def run(self, **kwargs):
+            session = get_session()
+            article = Article(
+                title="调度失败文章",
+                raw_content="<p>raw</p>",
+                final_content="<p>final</p>",
+                digest="digest",
+                topic=kwargs["source"],
+                topic_strategy=kwargs["style"],
+                ai_score=0.1,
+                status="draft",
+            )
+            session.add(article)
+            session.commit()
+            article_id = article.id
+            session.close()
+            return {
+                "id": article_id,
+                "title": "调度失败文章",
+                "content": "<p>final</p>",
+                "digest": "digest",
+                "ai_score": 0.1,
+                "ai_images": [],
+                "material_images": [],
+                "screenshots": [],
+                "source_type": "topic",
+            }
+
+        async def publish(self, result):
+            return PublishResult(False, "wechat_api_failed", "invalid credential")
+
+    monkeypatch.setattr(job_runner, "ArticleGenerationPipeline", FakePipeline)
+
+    session = get_session()
+    session.add(HotTopic(
+        title="AI Agent 发布失败",
+        source="unit",
+        url="https://example.com/fail-topic",
+        description="desc",
+        hot_score=2.0,
+        used=False,
+    ))
+    session.commit()
+    session.close()
+
+    result = asyncio.run(ArticlePipeline().run_full_pipeline("hot_tech"))
+
+    assert result is not None
+    session = get_session()
+    logs = session.query(PublishLog).filter_by(article_id=result.id).all()
+    session.close()
+    assert any(
+        log.action == "create_draft"
+        and log.status == "failed"
+        and log.error_message == "invalid credential"
+        for log in logs
+    )
 
 
 def test_publish_via_browser_marks_article_published(monkeypatch):

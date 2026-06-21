@@ -141,6 +141,7 @@ python -m src.scheduler.job_runner start
 - 已经是 `http://`、`https://` 或 `data:` 的图片 URL 不会被本地上传逻辑改写。
 - Web 预览和草稿创建前会净化文章 HTML，去掉脚本、事件属性、危险 URL 等主动内容；已创建过微信草稿的文章再次点击发布会直接返回已有草稿状态，不会重复创建草稿。
 - Web 预览会把本地图片路径重写为只读媒体 URL，只允许访问 `data/research_images`、`data/generated_images`、`data/screenshots`、`data/mock_images` 下的图片；数据库、cookies、上传源文件等不会被静态暴露。
+- 草稿创建会返回结构化结果；缺微信凭据、缺封面、封面上传失败、微信 API 返回错误等情况会在 CLI/Web/调度日志中显示具体原因。
 
 ## 架构
 

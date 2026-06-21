@@ -161,17 +161,17 @@ async def _run_generation_task_inner(task_id: str, req: GenerateRequest):
 
         if req.publish:
             tasks[task_id]["message"] = "正在推送到微信草稿..."
-            pub_ok = await pipeline.publish(result)
-            if pub_ok:
+            publish_result = await pipeline.publish(result)
+            if publish_result:
                 tasks[task_id] = {
                     "status": "done", "progress": 100,
-                    "message": "已推送到微信草稿箱",
+                    "message": _format_publish_success_message(publish_result),
                     "article_id": result["id"],
                 }
             else:
                 tasks[task_id] = {
                     "status": "done", "progress": 100,
-                    "message": "文章已生成，但推送草稿失败",
+                    "message": f"文章已生成，但推送草稿失败: {_publish_message(publish_result, '推送失败')}",
                     "article_id": result["id"],
                 }
         else:
@@ -306,7 +306,12 @@ async def publish_article(article_id: int):
     if a.status == "draft_created" and a.media_id:
         media_id = a.media_id
         session.close()
-        return PublishResponse(success=True, message=f"已存在微信草稿: {media_id}")
+        return PublishResponse(
+            success=True,
+            message=f"已存在微信草稿: {media_id}",
+            media_id=media_id,
+            code="already_created",
+        )
 
     result = {
         "id": a.id,
@@ -318,7 +323,7 @@ async def publish_article(article_id: int):
 
     checks = collect_readiness(publish=True, check_model=False, check_research=False)
     if not readiness_ok(checks):
-        return PublishResponse(success=False, message=_readiness_failure_message(checks))
+        return PublishResponse(success=False, message=_readiness_failure_message(checks), code="readiness_failed")
 
     def _do_publish():
         import asyncio as _aio
@@ -335,17 +340,27 @@ async def publish_article(article_id: int):
 async def _publish_inner(article_id: int, result: dict):
     try:
         pipeline = ArticleGenerationPipeline()
-        ok = await pipeline.publish(result)
-        if ok:
+        publish_result = await pipeline.publish(result)
+        if publish_result:
             session2 = get_session()
             art = session2.query(Article).get(article_id)
             if art:
                 art.status = "draft_created"
                 session2.commit()
             session2.close()
-            return PublishResponse(success=True, message="已推送到微信草稿箱")
+            return PublishResponse(
+                success=True,
+                message=_publish_message(publish_result, "草稿创建成功"),
+                media_id=_publish_media_id(publish_result),
+                code=_publish_code(publish_result),
+                thumb_media_id=_publish_thumb_media_id(publish_result),
+            )
         else:
-            return PublishResponse(success=False, message="推送失败")
+            return PublishResponse(
+                success=False,
+                message=_publish_message(publish_result, "推送失败"),
+                code=_publish_code(publish_result),
+            )
     except Exception as e:
         return PublishResponse(success=False, message=str(e))
 
@@ -463,6 +478,28 @@ def _is_blank_secret(value) -> bool:
 def _readiness_failure_message(checks) -> str:
     blockers = [item.message for item in checks if not item.ok and item.severity != "warning"]
     return "；".join(blockers) if blockers else "配置检查未通过"
+
+
+def _publish_message(result, fallback: str) -> str:
+    return getattr(result, "message", "") or fallback
+
+
+def _publish_code(result) -> str:
+    return getattr(result, "code", "") or ""
+
+
+def _publish_media_id(result) -> str:
+    return getattr(result, "media_id", "") or ""
+
+
+def _publish_thumb_media_id(result) -> str:
+    return getattr(result, "thumb_media_id", "") or ""
+
+
+def _format_publish_success_message(result) -> str:
+    message = _publish_message(result, "已推送到微信草稿箱")
+    media_id = _publish_media_id(result)
+    return f"{message}: {media_id}" if media_id else message
 
 
 def _preview_article_content(content: str) -> str:

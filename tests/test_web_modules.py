@@ -272,6 +272,10 @@ def test_module_publish_contract(monkeypatch):
     assert r.status_code == 200
     body = r.json()
     assert body["success"] is True, body
+    assert body["media_id"] == "mock_media_id_001"
+    assert body["message"] == "草稿创建成功"
+    assert body["code"] == "ok"
+    assert body["thumb_media_id"] == "thumb_test"
 
     # 状态应流转到 draft_created
     from src.db.models import get_session, Article
@@ -286,4 +290,6 @@ def test_module_publish_contract(monkeypatch):
     assert r2.status_code == 200
     assert r2.json()["success"] is True
     assert "已存在微信草稿" in r2.json()["message"]
+    assert r2.json()["media_id"] == "mock_media_id_001"
+    assert r2.json()["code"] == "already_created"
     assert calls["create_draft"] == 1

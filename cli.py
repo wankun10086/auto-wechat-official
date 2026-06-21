@@ -120,12 +120,11 @@ async def cmd_from_url(args):
         print(f"  已保存到: {args.output}")
 
     if args.publish:
-        from src.pipeline import ArticleGenerationPipeline
         pub_result = await pipeline.publish(result)
         if pub_result:
-            print("  草稿创建成功！")
+            print(f"  {_format_publish_success(pub_result)}")
         else:
-            print("  草稿创建失败")
+            print(f"  草稿创建失败: {_publish_message(pub_result)}")
 
 
 async def cmd_from_file(args):
@@ -163,9 +162,9 @@ async def cmd_from_file(args):
     if args.publish:
         pub_result = await pipeline.publish(result)
         if pub_result:
-            print("  草稿创建成功！")
+            print(f"  {_format_publish_success(pub_result)}")
         else:
-            print("  草稿创建失败")
+            print(f"  草稿创建失败: {_publish_message(pub_result)}")
 
 
 async def cmd_from_topic(args):
@@ -201,9 +200,9 @@ async def cmd_from_topic(args):
     if args.publish:
         pub_result = await pipeline.publish(result)
         if pub_result:
-            print("  草稿创建成功")
+            print(f"  {_format_publish_success(pub_result)}")
         else:
-            print("  草稿创建失败")
+            print(f"  草稿创建失败: {_publish_message(pub_result)}")
 
 
 async def cmd_login():
@@ -293,6 +292,16 @@ def _ensure_ready_for_publish(model: str | None) -> bool:
             print(f"  - {item.message}")
     print("可运行 `python cli.py doctor --publish` 查看完整检查。")
     return False
+
+
+def _publish_message(result) -> str:
+    return getattr(result, "message", "") or "推送失败"
+
+
+def _format_publish_success(result) -> str:
+    message = getattr(result, "message", "") or "草稿创建成功"
+    media_id = getattr(result, "media_id", "") or ""
+    return f"{message}: {media_id}" if media_id else message
 
 
 def main():

@@ -1,5 +1,6 @@
 import html as html_lib
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
 from bs4 import BeautifulSoup
@@ -14,6 +15,18 @@ from src.content.screenshot import ScreenshotCapture
 from src.content.template import ArticleTemplate
 from src.db.models import Article, get_session
 from src.wechat.api_client import WeChatAPIClient
+
+
+@dataclass
+class PublishResult:
+    ok: bool
+    code: str
+    message: str
+    media_id: str = ""
+    thumb_media_id: str = ""
+
+    def __bool__(self) -> bool:
+        return self.ok
 
 
 class ArticleGenerationPipeline:
@@ -116,17 +129,24 @@ class ArticleGenerationPipeline:
         finally:
             session.close()
 
-    async def publish(self, result: dict) -> bool:
+    async def publish(self, result: dict) -> PublishResult:
         session = get_session(self.db_path)
         try:
             if not self.api_client.app_id or not self.api_client.app_secret:
-                logger.warning("微信 AppID/AppSecret 未配置，无法创建草稿")
-                return False
+                message = "微信 AppID/AppSecret 未配置，无法创建草稿"
+                logger.warning(message)
+                return PublishResult(False, "missing_wechat_credentials", message)
 
-            thumb_media_id = self._resolve_thumb_media_id(result)
+            try:
+                thumb_media_id = self._resolve_thumb_media_id(result)
+            except Exception as e:
+                message = f"封面图上传失败: {e}"
+                logger.error(message)
+                return PublishResult(False, "thumb_upload_failed", message)
             if not thumb_media_id:
-                logger.warning("未配置默认封面图 thumb_media_id，且没有可上传的本地图片")
-                return False
+                message = "未配置默认封面图 thumb_media_id，且没有可上传的本地图片"
+                logger.warning(message)
+                return PublishResult(False, "missing_thumb", message)
 
             media_id = self.api_client.create_draft(
                 title=result["title"],
@@ -144,10 +164,11 @@ class ArticleGenerationPipeline:
                 session.commit()
 
             logger.info(f"草稿创建成功: {media_id}")
-            return True
+            return PublishResult(True, "ok", "草稿创建成功", media_id=media_id, thumb_media_id=thumb_media_id)
         except Exception as e:
-            logger.error(f"草稿创建失败: {e}")
-            return False
+            message = f"草稿创建失败: {e}"
+            logger.error(message)
+            return PublishResult(False, "wechat_api_failed", message)
         finally:
             session.close()
 

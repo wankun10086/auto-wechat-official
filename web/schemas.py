@@ -74,3 +74,5 @@ class PublishResponse(BaseModel):
     success: bool
     message: str
     media_id: Optional[str] = None
+    code: Optional[str] = None
+    thumb_media_id: Optional[str] = None

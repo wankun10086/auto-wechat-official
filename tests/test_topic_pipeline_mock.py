@@ -85,9 +85,12 @@ def test_publish_rewrites_local_images_and_uses_generated_thumb(local_tmp, monke
     result["content"] = f"<style>.x{{}}</style><p>x</p><img src=\"{image_path}\">"
     result["ai_images"] = [{"path": str(image_path), "description": "cover"}]
 
-    ok = asyncio.run(pipe.publish(result))
+    publish_result = asyncio.run(pipe.publish(result))
 
-    assert ok is True
+    assert publish_result.ok is True
+    assert publish_result.code == "ok"
+    assert publish_result.media_id == "mock_media_id_001"
+    assert publish_result.thumb_media_id == "thumb_mock"
     article = captured["json"]["articles"][0]
     assert captured["path"] == "draft/add"
     assert article["thumb_media_id"] == "thumb_mock"
@@ -127,7 +130,7 @@ def test_wechat_image_mime_uses_file_suffix():
     assert client._image_mime("cover.unknown") == "image/jpeg"
 
 
-def test_publish_returns_false_when_wechat_credentials_missing(monkeypatch):
+def test_publish_returns_structured_error_when_wechat_credentials_missing(monkeypatch):
     pipe = ArticleGenerationPipeline(model="mock")
     pipe.api_client.app_id = ""
     pipe.api_client.app_secret = ""
@@ -137,7 +140,7 @@ def test_publish_returns_false_when_wechat_credentials_missing(monkeypatch):
 
     monkeypatch.setattr(pipe.api_client, "upload_thumb_image", fail_upload)
 
-    ok = asyncio.run(pipe.publish({
+    publish_result = asyncio.run(pipe.publish({
         "id": 0,
         "title": "title",
         "content": "<p>x</p>",
@@ -147,4 +150,59 @@ def test_publish_returns_false_when_wechat_credentials_missing(monkeypatch):
         "screenshots": [],
     }))
 
-    assert ok is False
+    assert publish_result.ok is False
+    assert publish_result.code == "missing_wechat_credentials"
+    assert "AppID/AppSecret" in publish_result.message
+
+
+def test_publish_returns_structured_error_when_thumb_upload_fails(local_tmp, monkeypatch):
+    image_path = local_tmp / "cover.jpg"
+    image_path.write_bytes(b"fake-image")
+
+    pipe = ArticleGenerationPipeline(model="mock")
+    pipe.config._data.setdefault("wechat", {})["default_thumb_media_id"] = ""
+
+    def fail_upload(path):
+        raise RuntimeError("thumb rejected")
+
+    monkeypatch.setattr(pipe.api_client, "upload_thumb_image", fail_upload)
+
+    publish_result = asyncio.run(pipe.publish({
+        "id": 0,
+        "title": "title",
+        "content": "<p>x</p>",
+        "digest": "",
+        "ai_images": [{"path": str(image_path)}],
+        "material_images": [],
+        "screenshots": [],
+    }))
+
+    assert publish_result.ok is False
+    assert publish_result.code == "thumb_upload_failed"
+    assert "thumb rejected" in publish_result.message
+
+
+def test_publish_returns_structured_error_when_create_draft_fails(monkeypatch):
+    pipe = ArticleGenerationPipeline(model="mock")
+    pipe.api_client.app_id = "wx"
+    pipe.api_client.app_secret = "secret"
+    pipe.config._data.setdefault("wechat", {})["default_thumb_media_id"] = "thumb_test"
+
+    def fail_create_draft(**kwargs):
+        raise RuntimeError("invalid thumb media")
+
+    monkeypatch.setattr(pipe.api_client, "create_draft", fail_create_draft)
+
+    publish_result = asyncio.run(pipe.publish({
+        "id": 0,
+        "title": "title",
+        "content": "<p>x</p>",
+        "digest": "",
+        "ai_images": [],
+        "material_images": [],
+        "screenshots": [],
+    }))
+
+    assert publish_result.ok is False
+    assert publish_result.code == "wechat_api_failed"
+    assert "invalid thumb media" in publish_result.message
