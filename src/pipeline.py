@@ -2,6 +2,7 @@ import html as html_lib
 import re
 from pathlib import Path
 
+from bs4 import BeautifulSoup
 from loguru import logger
 
 from src.ai.provider import get_provider
@@ -278,7 +279,22 @@ class ArticleGenerationPipeline:
                 path = image.get("path", "")
                 if path and Path(path).exists():
                     return self.api_client.upload_thumb_image(path)
+
+        for path in self._local_image_paths_from_html(result.get("content", "")):
+            return self.api_client.upload_thumb_image(path)
         return ""
+
+    def _local_image_paths_from_html(self, content: str) -> list[str]:
+        soup = BeautifulSoup(content or "", "html.parser")
+        paths = []
+        for img in soup.find_all("img"):
+            src = img.get("src", "")
+            if not src or re.match(r"^(https?:|data:)", src, re.I):
+                continue
+            path = Path(src)
+            if path.exists():
+                paths.append(str(path))
+        return paths
 
     def _extract_html(self, text: str) -> str:
         if "```html" in text:

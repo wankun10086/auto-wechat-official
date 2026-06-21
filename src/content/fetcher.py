@@ -85,12 +85,7 @@ class ContentFetcher:
 
         text = target.get_text(separator="\n", strip=True) if target else ""
 
-        images_meta = []
-        for img in (target or soup).find_all("img"):
-            src = img.get("src", "")
-            alt = img.get("alt", "")
-            if src and not src.startswith("data:"):
-                images_meta.append({"src": src, "alt": alt})
+        images_meta = self._extract_images_meta(soup, target or soup)
 
         return ContentResult(
             url=url,
@@ -100,6 +95,41 @@ class ContentFetcher:
             source_type="web",
             metadata={"images_meta": images_meta[:20]},
         )
+
+    def _extract_images_meta(self, soup: BeautifulSoup, target) -> list[dict]:
+        images_meta = []
+        seen = set()
+
+        for selector, attr in (
+            ('meta[property="og:image"]', "content"),
+            ('meta[name="twitter:image"]', "content"),
+            ('meta[property="twitter:image"]', "content"),
+        ):
+            tag = soup.select_one(selector)
+            src = tag.get(attr, "") if tag else ""
+            if src and not src.startswith("data:") and src not in seen:
+                seen.add(src)
+                images_meta.append({"src": src, "alt": ""})
+
+        for img in target.find_all("img"):
+            src = self._first_image_src(img)
+            alt = img.get("alt", "")
+            if src and not src.startswith("data:") and src not in seen:
+                seen.add(src)
+                images_meta.append({"src": src, "alt": alt})
+        return images_meta
+
+    def _first_image_src(self, img) -> str:
+        for attr in ("src", "data-src", "data-original", "data-lazy-src", "data-url"):
+            value = img.get(attr, "")
+            if value:
+                return value
+
+        srcset = img.get("srcset") or img.get("data-srcset") or ""
+        if srcset:
+            first = srcset.split(",", 1)[0].strip()
+            return first.split(" ", 1)[0].strip()
+        return ""
 
     async def _fetch_github(self, url: str) -> ContentResult:
         parts = url.rstrip("/").split("/")

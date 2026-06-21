@@ -94,3 +94,34 @@ def test_publish_rewrites_local_images_and_uses_generated_thumb(local_tmp, monke
     assert "<style>" not in article["content"]
     assert str(image_path) not in article["content"]
     assert "https://mock.wechat.local/content.jpg" in article["content"]
+
+
+def test_publish_thumb_fallback_reads_local_image_from_html(local_tmp, monkeypatch):
+    image_path = local_tmp / "cover.png"
+    image_path.write_bytes(b"fake-image")
+    captured = {}
+
+    def fake_upload_thumb(self, path):
+        captured["path"] = path
+        return "thumb_from_html"
+
+    monkeypatch.setattr(WeChatAPIClient, "upload_thumb_image", fake_upload_thumb)
+
+    pipe = ArticleGenerationPipeline(model="mock")
+    pipe.config._data.setdefault("wechat", {})["default_thumb_media_id"] = ""
+    thumb = pipe._resolve_thumb_media_id({
+        "content": f"<p>x</p><img src=\"{image_path}\">",
+        "ai_images": [],
+        "material_images": [],
+        "screenshots": [],
+    })
+
+    assert thumb == "thumb_from_html"
+    assert Path(captured["path"]) == image_path
+
+
+def test_wechat_image_mime_uses_file_suffix():
+    client = WeChatAPIClient("app", "secret")
+
+    assert client._image_mime("cover.png") == "image/png"
+    assert client._image_mime("cover.unknown") == "image/jpeg"

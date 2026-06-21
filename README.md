@@ -54,6 +54,7 @@ ai:
 
 research:
   search_provider: duckduckgo   # duckduckgo | bing | serper
+  image_search_provider: auto    # auto | serper | bing | none
   serper_api_key: ""
   query_suffix: "最新 解读 分析"
   material_count: 5
@@ -61,7 +62,7 @@ research:
   download_images: true
 ```
 
-`research` 配置用于议题模式：系统会按议题生成搜索 query，抓取网页素材，提取候选图片，并下载可用图片。`serper` 需要 API Key；`duckduckgo` 和 `bing` 走 HTML 搜索，稳定性取决于网络环境。
+`research` 配置用于议题模式：系统会按议题生成搜索 query，抓取网页素材，提取候选图片，并下载可用图片。`search_provider` 控制网页素材检索；`image_search_provider` 控制显式图片检索，`auto` 会优先尝试 Serper Images，有 key 时最稳定，没有 key 时降级到 Bing 图片页。`serper` 需要 API Key；`duckduckgo` 和 `bing` 走 HTML 搜索，稳定性取决于网络环境。
 
 ## CLI
 
@@ -123,9 +124,9 @@ python -m src.scheduler.job_runner start
 ## 图片与草稿箱
 
 - MiniMax 和 GLM 支持 AI 配图；DeepSeek 和 Kimi 只负责文本。
-- 议题模式会从检索素材中提取图片候选，并可下载后嵌入文章。
+- 议题模式会从检索素材中提取图片候选，也会显式搜索图片；下载时会跳过坏链接、非图片响应和过小图片，优先把成功落地的本地图片嵌入文章。
 - 创建微信草稿前，本地 `<img src="...">` 会通过 `media/uploadimg` 上传并替换为微信图片 URL。
-- 如果 `default_thumb_media_id` 为空，系统会尝试上传本次生成/检索到的第一张本地图片作为封面素材。
+- 如果 `default_thumb_media_id` 为空，系统会尝试上传本次生成/检索到的第一张本地图片作为封面素材；从 Web UI 稍后发布时，也会从已保存 HTML 中的第一张本地图片兜底取封面。
 - 已经是 `http://`、`https://` 或 `data:` 的图片 URL 不会被本地上传逻辑改写。
 
 ## 架构

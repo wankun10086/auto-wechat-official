@@ -1,12 +1,15 @@
 from dataclasses import dataclass, field
+from io import BytesIO
 from pathlib import Path
 from urllib.parse import parse_qs, quote_plus, unquote, urljoin, urlparse
 import hashlib
+import json
 import re
 
 import httpx
 from bs4 import BeautifulSoup
 from loguru import logger
+from PIL import Image
 
 from src.config import Config
 from src.content.fetcher import ContentFetcher, ContentResult
@@ -18,6 +21,8 @@ class ResearchImage:
     alt: str = ""
     source_url: str = ""
     path: str = ""
+    width: int = 0
+    height: int = 0
 
 
 @dataclass
@@ -72,6 +77,7 @@ class TopicResearcher:
         self.image_count = int(self.config.get("research", "image_count", default=4))
         self.download_images = bool(self.config.get("research", "download_images", default=True))
         self.search_provider = self.config.get("research", "search_provider", default="duckduckgo")
+        self.image_search_provider = self.config.get("research", "image_search_provider", default="auto")
 
     async def research(self, topic: str) -> ResearchResult:
         topic = topic.strip()
@@ -90,9 +96,11 @@ class TopicResearcher:
             if len(sources) >= self.material_count:
                 break
 
-        images = self._collect_images(sources)
+        page_images = self._collect_images(sources)
+        searched_images = await self.search_images(query, limit=max(self.image_count * 2, self.image_count))
+        images = self._dedupe_images(page_images + searched_images)
         if self.download_images:
-            await self._download_images(images[: self.image_count])
+            images = await self._download_images(images, target_count=self.image_count)
 
         return ResearchResult(
             topic=topic,
@@ -119,12 +127,39 @@ class TopicResearcher:
         logger.warning("所有搜索源均未返回可用结果，将按议题直接生成")
         return []
 
+    async def search_images(self, query: str, limit: int = 6) -> list[ResearchImage]:
+        provider = (self.image_search_provider or "auto").lower()
+        if provider == "none":
+            return []
+
+        if provider == "auto":
+            providers = ["serper", "bing"]
+        else:
+            providers = [provider] + [p for p in ("serper", "bing") if p != provider]
+
+        for item in providers:
+            try:
+                images = await self._search_images_with_provider(item, query, limit)
+                images = self._dedupe_images(images)
+                if images:
+                    return images[:limit]
+            except Exception as e:
+                logger.warning(f"Image search provider {item} failed: {e}")
+        return []
+
     async def _search_with_provider(self, provider: str, query: str, limit: int) -> list[str]:
         if provider == "serper":
             return await self._search_serper(query, limit)
         if provider == "bing":
             return await self._search_bing_html(query, limit)
         return await self._search_duckduckgo_html(query, limit)
+
+    async def _search_images_with_provider(self, provider: str, query: str, limit: int) -> list[ResearchImage]:
+        if provider == "serper":
+            return await self._search_serper_images(query, limit)
+        if provider == "bing":
+            return await self._search_bing_images(query, limit)
+        return []
 
     def _build_query(self, topic: str) -> str:
         suffix = self.config.get("research", "query_suffix", default="最新 解读 分析")
@@ -144,6 +179,21 @@ class TopicResearcher:
             resp.raise_for_status()
             data = resp.json()
         return [item.get("link", "") for item in data.get("organic", []) if item.get("link")]
+
+    async def _search_serper_images(self, query: str, limit: int) -> list[ResearchImage]:
+        api_key = self.config.get("research", "serper_api_key", default="")
+        if not api_key:
+            return []
+
+        async with httpx.AsyncClient(headers=self.headers, timeout=20) as client:
+            resp = await client.post(
+                "https://google.serper.dev/images",
+                headers={"X-API-KEY": api_key, "Content-Type": "application/json"},
+                json={"q": query, "num": limit},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        return self._images_from_serper_payload(data, limit)
 
     async def _search_duckduckgo_html(self, query: str, limit: int) -> list[str]:
         url = f"https://duckduckgo.com/html/?q={quote_plus(query)}"
@@ -175,6 +225,54 @@ class TopicResearcher:
                 break
         return urls
 
+    async def _search_bing_images(self, query: str, limit: int) -> list[ResearchImage]:
+        url = f"https://www.bing.com/images/search?q={quote_plus(query)}"
+        async with httpx.AsyncClient(headers=self.headers, timeout=20, follow_redirects=True) as client:
+            resp = await client.get(url)
+            resp.raise_for_status()
+        return self._images_from_bing_html(resp.text, limit)
+
+    def _images_from_serper_payload(self, data: dict, limit: int) -> list[ResearchImage]:
+        images = []
+        for item in data.get("images", []):
+            url = item.get("imageUrl") or item.get("thumbnailUrl") or ""
+            if not url:
+                continue
+            images.append(ResearchImage(
+                url=url,
+                alt=item.get("title", ""),
+                source_url=item.get("link", ""),
+                width=self._safe_int(item.get("imageWidth")),
+                height=self._safe_int(item.get("imageHeight")),
+            ))
+            if len(images) >= limit:
+                break
+        return images
+
+    def _images_from_bing_html(self, html: str, limit: int) -> list[ResearchImage]:
+        soup = BeautifulSoup(html, "lxml")
+        images = []
+        for a in soup.select("a.iusc"):
+            meta = self._parse_bing_image_meta(a.get("m", ""))
+            url = meta.get("murl") or meta.get("turl") or ""
+            if not url:
+                continue
+            images.append(ResearchImage(
+                url=url,
+                alt=meta.get("t") or a.get("aria-label", ""),
+                source_url=meta.get("purl") or meta.get("surl", ""),
+            ))
+            if len(images) >= limit:
+                break
+        return images
+
+    def _parse_bing_image_meta(self, raw: str) -> dict:
+        try:
+            data = json.loads(raw or "{}")
+        except json.JSONDecodeError:
+            return {}
+        return data if isinstance(data, dict) else {}
+
     def _collect_images(self, sources: list[ContentResult]) -> list[ResearchImage]:
         images = []
         seen = set()
@@ -190,16 +288,27 @@ class TopicResearcher:
                 images.append(ResearchImage(url=url, alt=meta.get("alt", ""), source_url=source.url))
         return images
 
-    async def _download_images(self, images: list[ResearchImage]) -> None:
+    async def _download_images(self, images: list[ResearchImage], target_count: int | None = None) -> list[ResearchImage]:
+        target_count = len(images) if target_count is None else target_count
+        downloaded = []
         output_dir = Path("data/research_images")
         output_dir.mkdir(parents=True, exist_ok=True)
         async with httpx.AsyncClient(headers=self.headers, timeout=30, follow_redirects=True) as client:
             for image in images:
+                if len(downloaded) >= target_count:
+                    break
                 try:
                     resp = await client.get(image.url)
                     resp.raise_for_status()
                     content_type = resp.headers.get("content-type", "").split(";")[0].lower()
                     if not content_type.startswith("image/"):
+                        continue
+                    try:
+                        with Image.open(BytesIO(resp.content)) as probe:
+                            width, height = probe.size
+                    except Exception:
+                        continue
+                    if width < 80 or height < 80:
                         continue
                     ext = self._extension_from_content_type(content_type) or ".jpg"
                     digest = hashlib.sha256(resp.content).hexdigest()[:16]
@@ -207,8 +316,12 @@ class TopicResearcher:
                     if not path.exists():
                         path.write_bytes(resp.content)
                     image.path = str(path)
+                    image.width = image.width or width
+                    image.height = image.height or height
+                    downloaded.append(image)
                 except Exception as e:
                     logger.debug(f"素材图片下载失败 {image.url}: {e}")
+        return downloaded
 
     def _looks_like_image_url(self, url: str) -> bool:
         if url.startswith("data:"):
@@ -225,6 +338,20 @@ class TopicResearcher:
             "image/webp": ".webp",
             "image/gif": ".gif",
         }.get(content_type, "")
+
+    def _dedupe_images(self, images: list[ResearchImage]) -> list[ResearchImage]:
+        result = []
+        seen = set()
+        for image in images:
+            clean = self._normalize_result_url(image.url)
+            if not clean or clean in seen:
+                continue
+            if re.search(r"\.(svg|ico)(\?|$)", clean, re.I):
+                continue
+            seen.add(clean)
+            image.url = clean
+            result.append(image)
+        return result
 
     def _dedupe_urls(self, urls: list[str]) -> list[str]:
         result = []
@@ -250,3 +377,9 @@ class TopicResearcher:
         if clean.startswith("http://") or clean.startswith("https://"):
             return clean
         return ""
+
+    def _safe_int(self, value) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return 0

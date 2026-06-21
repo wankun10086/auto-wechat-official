@@ -33,6 +33,7 @@ ai:
 
 research:
   search_provider: duckduckgo   # duckduckgo | bing | serper
+  image_search_provider: auto    # auto | serper | bing | none
   serper_api_key: ""
   query_suffix: "最新 解读 分析"
   material_count: 5

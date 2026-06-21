@@ -1,4 +1,5 @@
 import json as _json
+import mimetypes
 import re
 import time
 import requests
@@ -74,7 +75,7 @@ class WeChatAPIClient:
         self._ensure_token()
         url = f"{self.BASE_URL}/material/add_material?access_token={self.access_token}&type=image"
         with open(image_path, "rb") as f:
-            files = {"media": (Path(image_path).name, f, "image/jpeg")}
+            files = {"media": (Path(image_path).name, f, self._image_mime(image_path))}
             resp = requests.post(url, files=files, timeout=30)
         data = resp.json()
         if "media_id" in data:
@@ -87,7 +88,7 @@ class WeChatAPIClient:
         self._ensure_token()
         url = f"{self.BASE_URL}/media/uploadimg?access_token={self.access_token}"
         with open(image_path, "rb") as f:
-            files = {"media": (Path(image_path).name, f, "image/jpeg")}
+            files = {"media": (Path(image_path).name, f, self._image_mime(image_path))}
             resp = requests.post(url, files=files, timeout=30)
         data = resp.json()
         if "url" in data:
@@ -126,6 +127,9 @@ class WeChatAPIClient:
     def _is_remote_image(self, src):
         lowered = src.lower()
         return lowered.startswith("http://") or lowered.startswith("https://") or lowered.startswith("data:")
+
+    def _image_mime(self, image_path):
+        return mimetypes.guess_type(str(image_path))[0] or "image/jpeg"
 
     def get_draft_list(self, offset=0, count=20):
         """获取草稿列表"""
