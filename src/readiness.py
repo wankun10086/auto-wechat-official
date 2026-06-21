@@ -1,13 +1,18 @@
 from dataclasses import dataclass
+from pathlib import Path
+import re
 
 from src.ai.provider import (
+    get_provider,
     is_placeholder_value,
     list_provider_names,
     provider_config_missing,
     provider_supports_image,
+    resolve_provider_name,
     resolve_image_provider_name,
 )
 from src.config import Config
+from src.wechat.api_client import WeChatAPIClient
 
 
 @dataclass
@@ -149,3 +154,69 @@ def collect_readiness(
 
 def readiness_ok(checks: list[ReadinessCheck]) -> bool:
     return all(check.ok or check.severity == "warning" for check in checks)
+
+
+def collect_live_readiness(
+    model: str | None = None,
+    image_model: str | None = None,
+    publish: bool = False,
+    generate_images: bool = True,
+) -> list[ReadinessCheck]:
+    """Run explicit live checks that may call paid or rate-limited remote APIs."""
+    config = Config()
+    ai_config = config.ai
+    provider_name = resolve_provider_name(model)
+    checks = []
+
+    try:
+        provider = get_provider(provider_name)
+        result = provider.generate("连通性测试：请只回复 OK。", temperature=0, max_tokens=20)
+        if result and (result.text or "").strip():
+            checks.append(ReadinessCheck("model_live", True, f"{provider_name} 文本模型实测可用", "info"))
+        else:
+            checks.append(ReadinessCheck("model_live", False, f"{provider_name} 文本模型返回空内容"))
+    except Exception as e:
+        checks.append(ReadinessCheck("model_live", False, f"{provider_name} 文本模型实测失败: {_safe_error(e)}"))
+
+    if generate_images:
+        image_provider = resolve_image_provider_name(image_model, provider_name)
+        if not image_provider:
+            checks.append(ReadinessCheck("image_live", True, "未配置可用 AI 配图模型；跳过图片实测", "warning"))
+        elif not provider_supports_image(image_provider):
+            checks.append(ReadinessCheck("image_live", False, f"{image_provider} 不支持图片生成"))
+        elif provider_config_missing(image_provider, ai_config.get(image_provider, {}), require_image=True):
+            checks.append(ReadinessCheck("image_live", False, f"{image_provider} 图片生成配置不完整，无法实测"))
+        else:
+            try:
+                image_provider_obj = provider if image_provider == provider_name else get_provider(image_provider)
+                image_path = image_provider_obj.generate_image(
+                    "微信公众号封面连通性测试图：AI Agent 产品趋势，科技媒体风格，不要文字水印。"
+                )
+                if image_path and Path(image_path).exists():
+                    checks.append(ReadinessCheck("image_live", True, f"{image_provider} AI 配图实测可用", "info"))
+                else:
+                    checks.append(ReadinessCheck("image_live", False, f"{image_provider} 图片接口未返回本地文件"))
+            except Exception as e:
+                checks.append(ReadinessCheck("image_live", False, f"{image_provider} AI 配图实测失败: {_safe_error(e)}"))
+    else:
+        checks.append(ReadinessCheck("image_live", True, "已跳过 AI 配图实测", "info"))
+
+    if publish:
+        wechat = config.wechat
+        try:
+            data = WeChatAPIClient(wechat.get("app_id", ""), wechat.get("app_secret", "")).get_draft_count()
+            if isinstance(data, dict) and data.get("errcode"):
+                checks.append(ReadinessCheck("wechat_live", False, f"微信草稿接口实测失败: {_safe_error(data)}"))
+            else:
+                checks.append(ReadinessCheck("wechat_live", True, "微信草稿接口实测可用", "info"))
+        except Exception as e:
+            checks.append(ReadinessCheck("wechat_live", False, f"微信草稿接口实测失败: {_safe_error(e)}"))
+
+    return checks
+
+
+def _safe_error(error) -> str:
+    message = str(error)
+    message = re.sub(r"sk-[A-Za-z0-9_-]{8,}", "sk-***", message)
+    message = re.sub(r"(?i)(api[_-]?key['\"]?\s*[:=]\s*['\"]?)[^,'\"}\s]+", r"\1***", message)
+    return message[:300]

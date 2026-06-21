@@ -27,6 +27,7 @@ def build_parser():
   python cli.py list
   python cli.py topics
   python cli.py doctor --model minimax --publish
+  python cli.py doctor --publish --live
         """,
     )
 
@@ -45,6 +46,7 @@ def build_parser():
                             help="截图目标，逗号分隔: code,charts,tables,images,all（默认不截图）")
     url_parser.add_argument("--no-images", action="store_true", help="不生成AI配图")
     url_parser.add_argument("--image-model", choices=AI_MODELS, help="指定AI配图模型（默认自动选择MiniMax/GLM）")
+    url_parser.add_argument("--require-ai-image", action="store_true", help="要求AI配图必须生成成功，否则停止创建草稿")
     url_parser.add_argument("--publish", action="store_true", help="生成后直接创建草稿")
     url_parser.add_argument("--output", "-o", help="输出文章HTML到文件")
 
@@ -59,6 +61,7 @@ def build_parser():
     file_parser.add_argument("--screenshot", default="", help="截图目标（仅对URL有效，文件模式忽略）")
     file_parser.add_argument("--no-images", action="store_true", help="不生成AI配图")
     file_parser.add_argument("--image-model", choices=AI_MODELS, help="指定AI配图模型（默认自动选择MiniMax/GLM）")
+    file_parser.add_argument("--require-ai-image", action="store_true", help="要求AI配图必须生成成功，否则停止创建草稿")
     file_parser.add_argument("--publish", action="store_true", help="生成后直接创建草稿")
     file_parser.add_argument("--output", "-o", help="输出文章HTML到文件")
 
@@ -71,6 +74,7 @@ def build_parser():
     topic_parser.add_argument("--prompt", "-p", default="", help="额外的写作指令")
     topic_parser.add_argument("--no-images", action="store_true", help="不生成或嵌入配图")
     topic_parser.add_argument("--image-model", choices=AI_MODELS, help="指定AI配图模型（默认自动选择MiniMax/GLM）")
+    topic_parser.add_argument("--require-ai-image", action="store_true", help="要求AI配图必须生成成功，否则停止创建微信草稿")
     topic_parser.add_argument("--publish", action="store_true", help="生成后直接创建微信草稿")
     topic_parser.add_argument("--output", "-o", help="输出文章HTML到文件")
 
@@ -93,6 +97,8 @@ def build_parser():
     doctor_parser.add_argument("--model", "-m", choices=AI_MODELS, help="指定要检查的模型")
     doctor_parser.add_argument("--image-model", choices=AI_MODELS, help="指定要检查的AI配图模型")
     doctor_parser.add_argument("--publish", action="store_true", help="同时检查微信草稿发布前置项")
+    doctor_parser.add_argument("--live", action="store_true", help="实际调用云端模型/微信接口做连通性检查（可能产生调用费用）")
+    doctor_parser.add_argument("--skip-image-live", action="store_true", help="配合 --live 使用，跳过AI配图实测")
 
     return parser
 
@@ -100,6 +106,7 @@ def build_parser():
 async def cmd_from_url(args):
     from src.pipeline import ArticleGenerationPipeline
 
+    _ensure_image_requirement_args(args)
     if args.publish and not _ensure_ready_for_publish(args.model, args.image_model, not args.no_images):
         return
 
@@ -129,6 +136,7 @@ async def cmd_from_url(args):
         print(f"  已保存到: {args.output}")
 
     if args.publish:
+        _ensure_required_ai_image(args, result)
         pub_result = await pipeline.publish(result)
         if pub_result:
             print(f"  {_format_publish_success(pub_result)}")
@@ -139,6 +147,7 @@ async def cmd_from_url(args):
 async def cmd_from_file(args):
     from src.pipeline import ArticleGenerationPipeline
 
+    _ensure_image_requirement_args(args)
     if not Path(args.file).exists():
         print(f"文件不存在: {args.file}")
         return
@@ -170,6 +179,7 @@ async def cmd_from_file(args):
         print(f"  已保存到: {args.output}")
 
     if args.publish:
+        _ensure_required_ai_image(args, result)
         pub_result = await pipeline.publish(result)
         if pub_result:
             print(f"  {_format_publish_success(pub_result)}")
@@ -180,6 +190,7 @@ async def cmd_from_file(args):
 async def cmd_from_topic(args):
     from src.pipeline import ArticleGenerationPipeline
 
+    _ensure_image_requirement_args(args)
     if args.publish and not _ensure_ready_for_publish(args.model, args.image_model, not args.no_images):
         return
 
@@ -214,6 +225,7 @@ async def cmd_from_topic(args):
         print(f"  已保存到: {args.output}")
 
     if args.publish:
+        _ensure_required_ai_image(args, result)
         pub_result = await pipeline.publish(result)
         if pub_result:
             print(f"  {_format_publish_success(pub_result)}")
@@ -323,10 +335,32 @@ def cmd_models():
 
 
 def cmd_doctor(args) -> int:
-    from src.readiness import collect_readiness, readiness_ok
+    from src.readiness import collect_live_readiness, collect_readiness, readiness_ok
 
     checks = collect_readiness(model=args.model, image_model=args.image_model, publish=args.publish)
     print("\n配置检查:\n")
+    _print_readiness_checks(checks)
+
+    all_checks = list(checks)
+    if args.live and readiness_ok(checks):
+        live_checks = collect_live_readiness(
+            model=args.model,
+            image_model=args.image_model,
+            publish=args.publish,
+            generate_images=not args.skip_image_live,
+        )
+        print("\n实测检查:\n")
+        _print_readiness_checks(live_checks)
+        all_checks.extend(live_checks)
+    elif args.live:
+        print("\n实测检查已跳过：静态配置检查未通过。")
+
+    ok = readiness_ok(all_checks)
+    print("\n结果: " + ("可运行" if ok else "存在阻断项，请先补齐配置"))
+    return 0 if ok else 1
+
+
+def _print_readiness_checks(checks) -> None:
     icons = {"error": "[ERR]", "warning": "[WARN]", "info": "[OK]"}
     for item in checks:
         icon = icons.get(item.severity, "[*]")
@@ -335,10 +369,6 @@ def cmd_doctor(args) -> int:
         elif not item.ok:
             icon = "[ERR]"
         print(f"  {icon} {item.name}: {item.message}")
-
-    ok = readiness_ok(checks)
-    print("\n结果: " + ("可运行" if ok else "存在阻断项，请先补齐配置"))
-    return 0 if ok else 1
 
 
 def _ensure_ready_for_publish(model: str | None, image_model: str | None, generate_images: bool) -> bool:
@@ -402,6 +432,19 @@ def _print_sources(result: dict) -> None:
 def _print_warnings(result: dict) -> None:
     for warning in result.get("warnings", []) or []:
         print(f"  注意: {warning}")
+
+
+def _ensure_image_requirement_args(args) -> None:
+    if getattr(args, "require_ai_image", False) and getattr(args, "no_images", False):
+        print("--require-ai-image 与 --no-images 不能同时使用")
+        raise SystemExit(1)
+
+
+def _ensure_required_ai_image(args, result: dict) -> None:
+    if getattr(args, "require_ai_image", False) and not result.get("ai_images"):
+        print("  AI配图必需但未生成，已停止创建草稿。")
+        print("  可先运行 `python cli.py doctor --publish --live` 检查图片模型是否真实可用。")
+        raise SystemExit(1)
 
 
 def _article_publish_metadata(article) -> dict:

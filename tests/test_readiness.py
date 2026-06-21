@@ -1,5 +1,7 @@
 from src.config import Config
-from src.readiness import collect_readiness, readiness_ok
+from src.ai.provider import GenerateResult
+import src.readiness as readiness_module
+from src.readiness import collect_live_readiness, collect_readiness, readiness_ok
 
 
 def test_readiness_reports_missing_provider_config():
@@ -179,3 +181,89 @@ def test_readiness_accepts_mock_provider_without_secrets():
 
     assert readiness_ok(checks) is True
     assert any(c.name == "model_config" and c.ok for c in checks)
+
+
+def test_live_readiness_accepts_mock_provider():
+    cfg = Config()
+    old_ai = cfg._data.get("ai", {}).copy()
+    cfg._data["ai"] = {"provider": "mock", "mock": {}}
+    try:
+        checks = collect_live_readiness(model="mock", publish=False)
+    finally:
+        cfg._data["ai"] = old_ai
+
+    assert readiness_ok(checks) is True
+    assert any(c.name == "model_live" and c.ok for c in checks)
+    assert any(c.name == "image_live" and c.ok for c in checks)
+
+
+def test_live_readiness_reports_image_api_failure_without_secret(monkeypatch):
+    cfg = Config()
+    old_ai = cfg._data.get("ai", {}).copy()
+    cfg._data["ai"] = {
+        "provider": "deepseek",
+        "deepseek": {
+            "api_key": "deepseek-key",
+            "base_url": "https://deepseek.example",
+            "model": "deepseek-chat",
+        },
+        "minimax": {
+            "api_key": "sk-sensitive-minimax-key",
+            "base_url": "https://minimax.example",
+            "model": "MiniMax-M3",
+            "image_model": "image-01",
+        },
+    }
+
+    class TextProvider:
+        def generate(self, prompt, **kwargs):
+            return GenerateResult("OK")
+
+    class ImageProvider:
+        def generate_image(self, prompt, **kwargs):
+            raise RuntimeError("invalid api_key sk-sensitive-minimax-key")
+
+    def fake_get_provider(name=None):
+        return ImageProvider() if name == "minimax" else TextProvider()
+
+    monkeypatch.setattr(readiness_module, "get_provider", fake_get_provider)
+    try:
+        checks = collect_live_readiness(model="deepseek", image_model="minimax", publish=False)
+    finally:
+        cfg._data["ai"] = old_ai
+
+    assert readiness_ok(checks) is False
+    image_check = next(c for c in checks if c.name == "image_live")
+    assert image_check.ok is False
+    assert "invalid" in image_check.message
+    assert "sk-sensitive-minimax-key" not in image_check.message
+
+
+def test_live_readiness_checks_wechat_when_publish(monkeypatch):
+    cfg = Config()
+    old_ai = cfg._data.get("ai", {}).copy()
+    old_wechat = cfg._data.get("wechat", {}).copy()
+    cfg._data["ai"] = {"provider": "mock", "mock": {}}
+    cfg._data["wechat"] = {
+        "app_id": "wx-live-test",
+        "app_secret": "wechat-secret",
+        "default_thumb_media_id": "thumb",
+    }
+
+    class FakeWeChatClient:
+        def __init__(self, app_id, app_secret):
+            self.app_id = app_id
+            self.app_secret = app_secret
+
+        def get_draft_count(self):
+            return {"total_count": 3}
+
+    monkeypatch.setattr(readiness_module, "WeChatAPIClient", FakeWeChatClient)
+    try:
+        checks = collect_live_readiness(model="mock", publish=True, generate_images=False)
+    finally:
+        cfg._data["ai"] = old_ai
+        cfg._data["wechat"] = old_wechat
+
+    assert readiness_ok(checks) is True
+    assert any(c.name == "wechat_live" and c.ok for c in checks)
