@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from pathlib import Path
-from urllib.parse import quote_plus, urljoin
+from urllib.parse import parse_qs, quote_plus, unquote, urljoin, urlparse
 import hashlib
 import re
 
@@ -62,8 +62,10 @@ class TopicResearcher:
         self.config = Config()
         self.fetcher = fetcher or ContentFetcher()
         self.headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                          "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            ),
             "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
         }
         self.material_count = int(self.config.get("research", "material_count", default=5))
@@ -100,14 +102,29 @@ class TopicResearcher:
         )
 
     async def search(self, query: str, limit: int = 5) -> list[str]:
-        provider = (self.search_provider or "duckduckgo").lower()
+        preferred = (self.search_provider or "duckduckgo").lower()
+        providers = [preferred] + [p for p in ("duckduckgo", "bing", "serper") if p != preferred]
+
+        for provider in providers:
+            try:
+                urls = await self._search_with_provider(provider, query, limit)
+                urls = self._dedupe_urls(urls)
+                if urls:
+                    if provider != preferred:
+                        logger.info(f"搜索源 {preferred} 无可用结果，已降级到 {provider}")
+                    return urls[:limit]
+            except Exception as e:
+                logger.warning(f"搜索源 {provider} 失败: {e}")
+
+        logger.warning("所有搜索源均未返回可用结果，将按议题直接生成")
+        return []
+
+    async def _search_with_provider(self, provider: str, query: str, limit: int) -> list[str]:
         if provider == "serper":
-            urls = await self._search_serper(query, limit)
-        elif provider == "bing":
-            urls = await self._search_bing_html(query, limit)
-        else:
-            urls = await self._search_duckduckgo_html(query, limit)
-        return self._dedupe_urls(urls)[:limit]
+            return await self._search_serper(query, limit)
+        if provider == "bing":
+            return await self._search_bing_html(query, limit)
+        return await self._search_duckduckgo_html(query, limit)
 
     def _build_query(self, topic: str) -> str:
         suffix = self.config.get("research", "query_suffix", default="最新 解读 分析")
@@ -116,7 +133,7 @@ class TopicResearcher:
     async def _search_serper(self, query: str, limit: int) -> list[str]:
         api_key = self.config.get("research", "serper_api_key", default="")
         if not api_key:
-            return await self._search_duckduckgo_html(query, limit)
+            return []
 
         async with httpx.AsyncClient(headers=self.headers, timeout=20) as client:
             resp = await client.post(
@@ -213,10 +230,23 @@ class TopicResearcher:
         result = []
         seen = set()
         for url in urls:
-            clean = url.strip()
+            clean = self._normalize_result_url(url)
             if not clean or clean in seen:
                 continue
-            if clean.startswith("http://") or clean.startswith("https://"):
-                seen.add(clean)
-                result.append(clean)
+            seen.add(clean)
+            result.append(clean)
         return result
+
+    def _normalize_result_url(self, url: str) -> str:
+        clean = (url or "").strip()
+        if clean.startswith("//"):
+            clean = "https:" + clean
+
+        parsed = urlparse(clean)
+        if parsed.netloc.endswith("duckduckgo.com") and parsed.path.startswith("/l/"):
+            target = parse_qs(parsed.query).get("uddg", [""])[0]
+            clean = unquote(target)
+
+        if clean.startswith("http://") or clean.startswith("https://"):
+            return clean
+        return ""

@@ -2,39 +2,34 @@ import asyncio
 import signal
 import sys
 from datetime import datetime
+
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from loguru import logger
+
 from src.config import Config, setup_logging
-from src.db.models import get_session, Article, HotTopic, PublishLog
-from src.content.generator import ContentGenerator
-from src.content.humanizer import Humanizer
-from src.content.template import ArticleTemplate
 from src.content.hot_topics import HotTopicCollector
-from src.wechat.api_client import WeChatAPIClient
+from src.db.models import Article, HotTopic, PublishLog, get_session
+from src.pipeline import ArticleGenerationPipeline
 from src.wechat.publisher import WeChatPublisher
+
+
+STYLE_BY_STRATEGY = {
+    "hot_tech": "tech_explanation",
+    "deep_analysis": "industry_analysis",
+}
+VALID_STYLES = {"tech_explanation", "product_review", "industry_analysis", "tutorial"}
 
 
 class ArticlePipeline:
     def __init__(self):
-        config = Config()
-        self.config = config
-
-        wechat_cfg = config.wechat
-        self.api_client = WeChatAPIClient(wechat_cfg["app_id"], wechat_cfg["app_secret"])
-        self.author = wechat_cfg.get("author", "")
-
-        self.generator = ContentGenerator()
-        self.humanizer = Humanizer(self.generator)
-        self.template = ArticleTemplate()
+        self.config = Config()
         self.hot_collector = HotTopicCollector()
         self.publisher = WeChatPublisher()
-
-        self.db_path = config.get("database", "path", default="data/articles.db")
+        self.db_path = self.config.get("database", "path", default="data/articles.db")
 
     async def run_full_pipeline(self, topic_strategy="hot_tech"):
         session = get_session(self.db_path)
-        article_record = None
         try:
             topic_info = await self._select_topic(topic_strategy, session)
             if not topic_info:
@@ -42,64 +37,40 @@ class ArticlePipeline:
                 return None
 
             logger.info(f"选定话题: {topic_info['title']}")
+            style = self._style_for_strategy(topic_strategy)
+            extra_prompt = self._topic_context_prompt(topic_info, topic_strategy)
 
-            source_materials = ""
-            if topic_info.get("url"):
-                source_materials = await self.hot_collector.fetch_article_content(topic_info["url"])
+            pipeline = ArticleGenerationPipeline()
+            result = await pipeline.run(
+                source=topic_info["title"],
+                source_type="topic",
+                style=style,
+                extra_prompt=extra_prompt,
+                screenshot_targets=[],
+                generate_images=True,
+            )
+            if not result:
+                logger.warning("流水线未产出文章")
+                return None
 
-            raw_content = self.generator.generate_article(
-                topic_info["title"], source_materials
+            draft_ok = await pipeline.publish(result)
+            self._log_action(
+                session,
+                result["id"],
+                "create_draft",
+                "success" if draft_ok else "failed",
+                None if draft_ok else "draft creation returned false",
             )
 
-            final_content, ai_score = self.humanizer.full_pipeline(raw_content)
-            final_content = self.template.wrap_article(final_content)
-
-            summary = self.generator.generate_digest(final_content)
-            titles = self.generator.generate_titles(summary)
-            title = titles[0] if titles else topic_info["title"]
-            digest = self.generator.generate_digest(final_content)
-
-            article_record = Article(
-                title=title,
-                raw_content=raw_content,
-                final_content=final_content,
-                digest=digest,
-                author=self.author,
-                topic=topic_info["title"],
-                topic_strategy=topic_strategy,
-                ai_score=ai_score,
-                status="draft",
-            )
-            session.add(article_record)
-            session.commit()
-            logger.info(f"文章已保存到数据库，ID: {article_record.id}")
-
-            thumb_media_id = self.config.get("wechat", "default_thumb_media_id", default="")
-            if not thumb_media_id:
-                logger.warning("未配置默认封面图 thumb_media_id，跳过草稿创建")
-                return article_record
-
-            media_id = self.api_client.create_draft(
-                title=title,
-                content=final_content,
-                thumb_media_id=thumb_media_id,
-                author=self.author,
-                digest=digest,
-            )
-            article_record.media_id = media_id
-            article_record.status = "draft_created"
-            session.commit()
-
-            self._log_action(session, article_record.id, "create_draft", "success")
-            logger.info(f"流程完成，草稿media_id: {media_id}")
-            return article_record
+            article = session.query(Article).get(result["id"])
+            if article:
+                article.topic_strategy = topic_strategy
+                session.commit()
+                logger.info(f"流程完成: {article.title} / {article.status}")
+            return article
 
         except Exception as e:
             logger.error(f"流程失败: {e}")
-            if article_record:
-                article_record.status = "failed"
-                session.commit()
-                self._log_action(session, article_record.id, "pipeline", "failed", str(e))
             return None
         finally:
             session.close()
@@ -166,6 +137,21 @@ class ArticlePipeline:
                 "description": topic.get("description", ""),
             }
         return None
+
+    def _style_for_strategy(self, strategy):
+        if strategy in VALID_STYLES:
+            return strategy
+        return STYLE_BY_STRATEGY.get(strategy, "tech_explanation")
+
+    def _topic_context_prompt(self, topic_info, strategy):
+        parts = [f"调度策略：{strategy}。"]
+        if topic_info.get("source"):
+            parts.append(f"热点来源：{topic_info['source']}。")
+        if topic_info.get("url"):
+            parts.append(f"热点原始链接：{topic_info['url']}。")
+        if topic_info.get("description"):
+            parts.append(f"话题描述：{topic_info['description']}。")
+        return "\n".join(parts)
 
     def _log_action(self, session, article_id, action, status, error=None):
         log = PublishLog(
