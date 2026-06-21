@@ -6,8 +6,9 @@ import threading
 from collections import deque
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import quote
 from fastapi import APIRouter, BackgroundTasks, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from loguru import logger
@@ -15,6 +16,7 @@ from src.config import Config
 from src.ai.provider import list_provider_names, provider_supports_image
 from src.content.sanitize import sanitize_article_html
 from src.pipeline import ArticleGenerationPipeline
+from src.readiness import collect_readiness, readiness_ok
 from src.db.models import get_session, Article, LogLine
 from web.schemas import (
     GenerateRequest, GenerateResponse, TaskStatus,
@@ -103,6 +105,13 @@ tasks: dict = {}
 
 _AI_PROVIDER_KEYS = {"deepseek", "kimi", "minimax", "glm"}
 _SECRET_KEYS = {"api_key", "app_secret"}
+_MEDIA_ROOTS = {
+    "research": Path("data/research_images"),
+    "generated": Path("data/generated_images"),
+    "screenshots": Path("data/screenshots"),
+    "mock": Path("data/mock_images"),
+}
+_MEDIA_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 
 
 def _run_pipeline_sync(task_id: str, req: GenerateRequest):
@@ -118,6 +127,16 @@ def _run_pipeline_sync(task_id: str, req: GenerateRequest):
 async def _run_generation_task_inner(task_id: str, req: GenerateRequest):
     tasks[task_id] = {"status": "running", "progress": 10, "message": "正在抓取内容..."}
     try:
+        if req.publish:
+            checks = collect_readiness(model=req.model, publish=True)
+            if not readiness_ok(checks):
+                tasks[task_id] = {
+                    "status": "failed",
+                    "progress": 0,
+                    "message": _readiness_failure_message(checks),
+                }
+                return
+
         pipeline = ArticleGenerationPipeline(model=req.model)
         tasks[task_id] = {"status": "running", "progress": 30, "message": "正在生成文章..."}
         source_type = req.source_type or "url"
@@ -224,6 +243,12 @@ async def get_task(task_id: str):
     )
 
 
+@router.get("/media/{kind}/{path:path}")
+async def get_media(kind: str, path: str):
+    media_path = _resolve_media_path(kind, path)
+    return FileResponse(media_path)
+
+
 @router.get("/articles", response_model=list[ArticleItem])
 async def list_articles():
     session = get_session()
@@ -254,7 +279,7 @@ async def get_article(article_id: int):
     result = ArticleDetail(
         id=a.id,
         title=a.title or "",
-        content=sanitize_article_html(a.final_content or ""),
+        content=_preview_article_content(a.final_content or ""),
         raw_content=a.raw_content or "",
         digest=a.digest or "",
         author=a.author or "",
@@ -290,6 +315,10 @@ async def publish_article(article_id: int):
         "digest": a.digest or "",
     }
     session.close()
+
+    checks = collect_readiness(publish=True, check_model=False, check_research=False)
+    if not readiness_ok(checks):
+        return PublishResponse(success=False, message=_readiness_failure_message(checks))
 
     def _do_publish():
         import asyncio as _aio
@@ -329,10 +358,12 @@ async def list_models():
     result = []
     for name in list_provider_names():
         pc = ai_config.get(name, {})
+        is_ready = bool(pc.get("api_key") and pc.get("base_url") and pc.get("model"))
         result.append(ModelInfo(
             name=name,
             model=pc.get("model", ""),
             has_key=bool(pc.get("api_key")),
+            is_ready=is_ready,
             supports_image=provider_supports_image(name),
             is_current=(name == current),
         ))
@@ -357,6 +388,8 @@ async def get_settings():
         },
         "wechat": {
             "app_id": wechat_config.get("app_id", ""),
+            "app_secret": "",
+            "app_secret_set": bool(wechat_config.get("app_secret")),
             "author": wechat_config.get("author", ""),
             "default_thumb_media_id": wechat_config.get("default_thumb_media_id", ""),
         },
@@ -425,6 +458,67 @@ def _merge_public_config(target: dict, incoming: dict) -> None:
 
 def _is_blank_secret(value) -> bool:
     return value is None or value == ""
+
+
+def _readiness_failure_message(checks) -> str:
+    blockers = [item.message for item in checks if not item.ok and item.severity != "warning"]
+    return "；".join(blockers) if blockers else "配置检查未通过"
+
+
+def _preview_article_content(content: str) -> str:
+    safe = sanitize_article_html(content or "")
+    return _rewrite_local_image_sources(safe)
+
+
+def _rewrite_local_image_sources(content: str) -> str:
+    from bs4 import BeautifulSoup
+
+    soup = BeautifulSoup(content or "", "html.parser")
+    for img in soup.find_all("img"):
+        src = img.get("src", "")
+        media_url = _media_url_for_local_path(src)
+        if media_url:
+            img["src"] = media_url
+    return str(soup)
+
+
+def _media_url_for_local_path(src: str) -> str:
+    if not src or _is_remote_or_data(src):
+        return ""
+
+    try:
+        candidate = Path(src).resolve()
+    except (OSError, RuntimeError, ValueError):
+        return ""
+
+    for kind, root in _MEDIA_ROOTS.items():
+        try:
+            rel = candidate.relative_to(root.resolve())
+        except ValueError:
+            continue
+        if candidate.suffix.lower() not in _MEDIA_EXTENSIONS:
+            return ""
+        return f"/api/media/{kind}/{quote(rel.as_posix(), safe='/')}"
+    return ""
+
+
+def _resolve_media_path(kind: str, path: str) -> Path:
+    root = _MEDIA_ROOTS.get(kind)
+    if not root:
+        raise HTTPException(status_code=404, detail="媒体类型不存在")
+    try:
+        candidate = (root / path).resolve()
+        candidate.relative_to(root.resolve())
+    except (OSError, RuntimeError, ValueError):
+        raise HTTPException(status_code=404, detail="媒体文件不存在")
+    if candidate.suffix.lower() not in _MEDIA_EXTENSIONS or not candidate.is_file():
+        raise HTTPException(status_code=404, detail="媒体文件不存在")
+    return candidate
+
+
+def _is_remote_or_data(src: str) -> bool:
+    lowered = (src or "").lower()
+    return lowered.startswith("http://") or lowered.startswith("https://") or lowered.startswith("data:")
 
 
 @router.get("/logs")

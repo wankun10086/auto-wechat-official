@@ -11,6 +11,7 @@ from src.config import Config, setup_logging
 from src.content.hot_topics import HotTopicCollector
 from src.db.models import Article, HotTopic, PublishLog, get_session
 from src.pipeline import ArticleGenerationPipeline
+from src.readiness import collect_readiness, readiness_ok
 from src.wechat.publisher import WeChatPublisher
 
 
@@ -31,6 +32,12 @@ class ArticlePipeline:
     async def run_full_pipeline(self, topic_strategy="hot_tech"):
         session = get_session(self.db_path)
         try:
+            checks = collect_readiness(publish=True)
+            if not readiness_ok(checks):
+                blockers = "；".join(item.message for item in checks if not item.ok and item.severity != "warning")
+                logger.error(f"配置检查未通过，跳过调度任务: {blockers}")
+                return None
+
             topic_info = await self._select_topic(topic_strategy, session)
             if not topic_info:
                 logger.warning("未找到合适的话题")

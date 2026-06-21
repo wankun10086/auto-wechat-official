@@ -100,7 +100,10 @@ python cli.py login
 python cli.py list
 python cli.py topics
 python cli.py models
+python cli.py doctor --model minimax --publish
 ```
+
+`doctor` 只报告配置项是否存在，不打印密钥值；加 `--publish` 会同时检查微信草稿所需的 AppID/AppSecret 和封面兜底情况。
 
 ## Web UI
 
@@ -137,6 +140,7 @@ python -m src.scheduler.job_runner start
 - 如果 `default_thumb_media_id` 为空，系统会尝试上传本次生成/检索到的第一张本地图片作为封面素材；从 Web UI 稍后发布时，也会从已保存 HTML 中的第一张本地图片兜底取封面。
 - 已经是 `http://`、`https://` 或 `data:` 的图片 URL 不会被本地上传逻辑改写。
 - Web 预览和草稿创建前会净化文章 HTML，去掉脚本、事件属性、危险 URL 等主动内容；已创建过微信草稿的文章再次点击发布会直接返回已有草稿状态，不会重复创建草稿。
+- Web 预览会把本地图片路径重写为只读媒体 URL，只允许访问 `data/research_images`、`data/generated_images`、`data/screenshots`、`data/mock_images` 下的图片；数据库、cookies、上传源文件等不会被静态暴露。
 
 ## 架构
 

@@ -56,6 +56,7 @@ export interface ModelInfo {
   name: string
   model: string
   has_key: boolean
+  is_ready: boolean
   supports_image: boolean
   is_current: boolean
 }
@@ -129,6 +130,8 @@ export interface SettingsData {
   }
   wechat: {
     app_id: string
+    app_secret?: string
+    app_secret_set?: boolean
     author: string
     default_thumb_media_id: string
   }

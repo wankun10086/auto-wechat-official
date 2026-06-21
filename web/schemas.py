@@ -65,6 +65,7 @@ class ModelInfo(BaseModel):
     name: str
     model: str
     has_key: bool
+    is_ready: bool
     supports_image: bool
     is_current: bool
 

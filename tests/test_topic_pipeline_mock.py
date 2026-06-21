@@ -125,3 +125,26 @@ def test_wechat_image_mime_uses_file_suffix():
 
     assert client._image_mime("cover.png") == "image/png"
     assert client._image_mime("cover.unknown") == "image/jpeg"
+
+
+def test_publish_returns_false_when_wechat_credentials_missing(monkeypatch):
+    pipe = ArticleGenerationPipeline(model="mock")
+    pipe.api_client.app_id = ""
+    pipe.api_client.app_secret = ""
+
+    def fail_upload(path):
+        raise AssertionError("publish should stop before uploading images")
+
+    monkeypatch.setattr(pipe.api_client, "upload_thumb_image", fail_upload)
+
+    ok = asyncio.run(pipe.publish({
+        "id": 0,
+        "title": "title",
+        "content": "<p>x</p>",
+        "digest": "",
+        "ai_images": [],
+        "material_images": [],
+        "screenshots": [],
+    }))
+
+    assert ok is False

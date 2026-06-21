@@ -38,6 +38,7 @@ def test_module_settings_read():
 
     cfg = Config()
     cfg._data.setdefault("ai", {}).setdefault("deepseek", {})["api_key"] = "unit-secret-key"
+    cfg._data.setdefault("wechat", {})["app_secret"] = "unit-wechat-secret"
     r = client.get("/api/settings")
     assert r.status_code == 200
     d = r.json()
@@ -45,7 +46,10 @@ def test_module_settings_read():
     assert "provider" in d["ai"]
     assert d["ai"]["deepseek"]["api_key"] == ""
     assert d["ai"]["deepseek"]["api_key_set"] is True
+    assert d["wechat"]["app_secret"] == ""
+    assert d["wechat"]["app_secret_set"] is True
     assert "unit-secret-key" not in json.dumps(d, ensure_ascii=False)
+    assert "unit-wechat-secret" not in json.dumps(d, ensure_ascii=False)
 
 
 def test_settings_update_does_not_overwrite_blank_secrets():
@@ -90,9 +94,11 @@ def test_settings_update_does_not_overwrite_blank_secrets():
 def test_module_models():
     r = client.get("/api/models")
     assert r.status_code == 200
-    names = {m["name"] for m in r.json()}
+    models = r.json()
+    names = {m["name"] for m in models}
     assert {"deepseek", "kimi", "minimax"} <= names
-    assert any(m.get("is_current") for m in r.json())
+    assert all("is_ready" in m for m in models)
+    assert any(m.get("is_current") for m in models)
 
 
 # 3) 日志模块（历史可读 + 持久化）
@@ -134,6 +140,30 @@ def test_module_generate_and_detail():
     assert 0.0 <= float(d["ai_score"]) <= 1.0
 
 
+def test_generate_publish_uses_readiness_gate(monkeypatch):
+    from src.readiness import ReadinessCheck
+    from web import api as webapi
+
+    monkeypatch.setattr(
+        webapi,
+        "collect_readiness",
+        lambda **kwargs: [ReadinessCheck("wechat", False, "微信配置缺失")],
+    )
+
+    r = client.post("/api/generate", json={
+        "source_type": "topic",
+        "topic": "AI Agent 产品趋势",
+        "style": "tech_explanation",
+        "publish": True,
+    })
+    assert r.status_code == 200
+    task_id = r.json()["task_id"]
+
+    status = client.get(f"/api/tasks/{task_id}").json()
+    assert status["status"] == "failed"
+    assert "微信配置缺失" in status["message"]
+
+
 def test_article_detail_sanitizes_preview_html():
     from src.db.models import get_session, Article
 
@@ -157,6 +187,70 @@ def test_article_detail_sanitizes_preview_html():
     assert "onclick" not in content
     assert "javascript:" not in content
     assert "正文" in content
+
+
+def test_article_detail_rewrites_local_media_for_preview():
+    from src.db.models import get_session, Article
+
+    media_dir = Path("data/research_images")
+    media_dir.mkdir(parents=True, exist_ok=True)
+    image_path = media_dir / "preview-test.png"
+    image_path.write_bytes(b"preview-image")
+
+    s = get_session()
+    article = Article(
+        title="media preview",
+        final_content=f'<p>正文</p><img src="{image_path}">',
+        raw_content="raw",
+        status="draft",
+    )
+    s.add(article)
+    s.commit()
+    aid = article.id
+    s.close()
+
+    r = client.get(f"/api/articles/{aid}")
+
+    assert r.status_code == 200
+    content = r.json()["content"]
+    assert str(image_path) not in content
+    assert '/api/media/research/preview-test.png' in content
+
+    media = client.get("/api/media/research/preview-test.png")
+    assert media.status_code == 200
+    assert media.content == b"preview-image"
+
+
+def test_article_detail_rewrites_mock_images_for_preview():
+    from src.db.models import get_session, Article
+
+    media_dir = Path("data/mock_images")
+    media_dir.mkdir(parents=True, exist_ok=True)
+    image_path = media_dir / "mock-preview.png"
+    image_path.write_bytes(b"mock-image")
+
+    s = get_session()
+    article = Article(
+        title="mock media preview",
+        final_content=f'<p>正文</p><img src="{image_path}">',
+        raw_content="raw",
+        status="draft",
+    )
+    s.add(article)
+    s.commit()
+    aid = article.id
+    s.close()
+
+    r = client.get(f"/api/articles/{aid}")
+
+    assert r.status_code == 200
+    assert '/api/media/mock/mock-preview.png' in r.json()["content"]
+
+
+def test_media_endpoint_rejects_traversal():
+    r = client.get("/api/media/research/../articles.db")
+
+    assert r.status_code == 404
 
 
 # 7) 发布模块（契约：monkeypatch 微信，验证状态流转，绝不触达真实微信）

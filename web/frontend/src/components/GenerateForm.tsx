@@ -202,12 +202,12 @@ export default function GenerateForm({ models, onGenerated, onError }: Props) {
             models.map(m => (
               <div
                 key={m.name}
-                className={`model-card ${selectedModel === m.name ? 'selected' : ''} ${!m.has_key ? 'disabled' : ''}`}
-                onClick={() => m.has_key && setSelectedModel(m.name)}
+                className={`model-card ${selectedModel === m.name ? 'selected' : ''} ${!m.is_ready ? 'disabled' : ''}`}
+                onClick={() => m.is_ready && setSelectedModel(m.name)}
               >
                 <div className="model-name">{m.name}</div>
-                <div className={`model-status ${m.has_key ? 'available' : ''}`}>
-                  {m.is_current ? '当前使用' : m.has_key ? '可用' : '未配置'}
+                <div className={`model-status ${m.is_ready ? 'available' : ''}`}>
+                  {m.is_current ? '当前使用' : m.is_ready ? '可用' : m.has_key ? '配置不完整' : '未配置'}
                 </div>
               </div>
             ))

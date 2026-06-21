@@ -25,6 +25,7 @@ def build_parser():
   python cli.py login
   python cli.py list
   python cli.py topics
+  python cli.py doctor --model minimax --publish
         """,
     )
 
@@ -81,11 +82,18 @@ def build_parser():
     # models 命令
     subparsers.add_parser("models", help="查看可用模型配置")
 
+    doctor_parser = subparsers.add_parser("doctor", help="检查模型、检索和微信草稿配置")
+    doctor_parser.add_argument("--model", "-m", choices=AI_MODELS, help="指定要检查的模型")
+    doctor_parser.add_argument("--publish", action="store_true", help="同时检查微信草稿发布前置项")
+
     return parser
 
 
 async def cmd_from_url(args):
     from src.pipeline import ArticleGenerationPipeline
+
+    if args.publish and not _ensure_ready_for_publish(args.model):
+        return
 
     pipeline = ArticleGenerationPipeline(model=args.model)
     result = await pipeline.run(
@@ -127,6 +135,9 @@ async def cmd_from_file(args):
         print(f"文件不存在: {args.file}")
         return
 
+    if args.publish and not _ensure_ready_for_publish(args.model):
+        return
+
     pipeline = ArticleGenerationPipeline(model=args.model)
     result = await pipeline.run(
         source=args.file,
@@ -153,10 +164,15 @@ async def cmd_from_file(args):
         pub_result = await pipeline.publish(result)
         if pub_result:
             print("  草稿创建成功！")
+        else:
+            print("  草稿创建失败")
 
 
 async def cmd_from_topic(args):
     from src.pipeline import ArticleGenerationPipeline
+
+    if args.publish and not _ensure_ready_for_publish(args.model):
+        return
 
     pipeline = ArticleGenerationPipeline(model=args.model)
     result = await pipeline.run(
@@ -245,6 +261,40 @@ def cmd_models():
     print(f"\n切换方式: python cli.py from-url <url> --model <name>")
 
 
+def cmd_doctor(args) -> int:
+    from src.readiness import collect_readiness, readiness_ok
+
+    checks = collect_readiness(model=args.model, publish=args.publish)
+    print("\n配置检查:\n")
+    icons = {"error": "[ERR]", "warning": "[WARN]", "info": "[OK]"}
+    for item in checks:
+        icon = icons.get(item.severity, "•")
+        if item.ok and item.severity != "warning":
+            icon = "[OK]"
+        elif not item.ok:
+            icon = "[ERR]"
+        print(f"  {icon} {item.name}: {item.message}")
+
+    ok = readiness_ok(checks)
+    print("\n结果: " + ("可运行" if ok else "存在阻断项，请先补齐配置"))
+    return 0 if ok else 1
+
+
+def _ensure_ready_for_publish(model: str | None) -> bool:
+    from src.readiness import collect_readiness, readiness_ok
+
+    checks = collect_readiness(model=model, publish=True)
+    if readiness_ok(checks):
+        return True
+
+    print("\n草稿发布前置检查未通过：")
+    for item in checks:
+        if not item.ok and item.severity != "warning":
+            print(f"  - {item.message}")
+    print("可运行 `python cli.py doctor --publish` 查看完整检查。")
+    return False
+
+
 def main():
     parser = build_parser()
     args = parser.parse_args()
@@ -271,6 +321,8 @@ def main():
         asyncio.run(cmd_topics())
     elif args.command == "models":
         cmd_models()
+    elif args.command == "doctor":
+        raise SystemExit(cmd_doctor(args))
     else:
         parser.print_help()
 

@@ -25,7 +25,7 @@ class ArticleGenerationPipeline:
         self.prompts = load_prompt("tech_article")
 
         wechat_cfg = self.config.wechat
-        self.api_client = WeChatAPIClient(wechat_cfg["app_id"], wechat_cfg["app_secret"])
+        self.api_client = WeChatAPIClient(wechat_cfg.get("app_id", ""), wechat_cfg.get("app_secret", ""))
         self.author = wechat_cfg.get("author", "")
         self.db_path = self.config.get("database", "path", default="data/articles.db")
 
@@ -119,6 +119,10 @@ class ArticleGenerationPipeline:
     async def publish(self, result: dict) -> bool:
         session = get_session(self.db_path)
         try:
+            if not self.api_client.app_id or not self.api_client.app_secret:
+                logger.warning("微信 AppID/AppSecret 未配置，无法创建草稿")
+                return False
+
             thumb_media_id = self._resolve_thumb_media_id(result)
             if not thumb_media_id:
                 logger.warning("未配置默认封面图 thumb_media_id，且没有可上传的本地图片")

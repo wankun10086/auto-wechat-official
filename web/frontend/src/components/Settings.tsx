@@ -71,6 +71,10 @@ export default function Settings({ onBack, onSaved, onError }: Props) {
     return current?.api_key_set ? <div className="hint">API Key 已配置；只有输入新值才会覆盖。</div> : null
   }
 
+  const appSecretPlaceholder = () => (
+    settings?.wechat.app_secret_set ? '已配置，留空不修改' : '输入微信公众号 AppSecret'
+  )
+
   if (!settings) {
     return (
       <div className="card">
@@ -240,6 +244,11 @@ export default function Settings({ onBack, onSaved, onError }: Props) {
             <div className="form-group">
               <label>AppID</label>
               <input className="input" placeholder="wx..." value={settings.wechat.app_id} onChange={e => updateWechat('app_id', e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label>AppSecret</label>
+              <input className="input" type="password" placeholder={appSecretPlaceholder()} value={settings.wechat.app_secret || ''} onChange={e => updateWechat('app_secret', e.target.value)} />
+              {settings.wechat.app_secret_set && <div className="hint">AppSecret 已配置；只有输入新值才会覆盖。</div>}
             </div>
             <div className="form-group">
               <label>作者名</label>
