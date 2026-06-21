@@ -103,3 +103,38 @@ def test_pipeline_can_use_separate_image_provider(local_tmp, monkeypatch):
     assert result["image_provider"] == "glm"
     assert result["ai_images"][0]["provider"] == "glm"
     assert Path(result["ai_images"][0]["path"]).exists()
+
+
+def test_title_generation_falls_back_when_model_returns_meta_reply():
+    pipe = ArticleGenerationPipeline(model="mock")
+
+    def bad_title_reply(prompt, **kwargs):
+        return GenerateResult(
+            "1. **麻烦提供完整文章或主要内容摘要后，我可以为你生成标题**\n"
+            "2. 请提供正文"
+        )
+
+    pipe.provider.generate = bad_title_reply
+
+    titles = pipe._generate_titles(
+        "<h2>AI Agent 落地观察</h2><p>企业正在推进 Agent 应用。</p>",
+        fallback_title="AI Agent 产品趋势与企业落地挑战",
+    )
+
+    assert titles == ["AI Agent 产品趋势与企业落地挑战"]
+
+
+def test_title_generation_cleans_markdown_bold_candidate():
+    pipe = ArticleGenerationPipeline(model="mock")
+
+    def title_reply(prompt, **kwargs):
+        return GenerateResult("1. **企业AI Agent，别急着上生产**")
+
+    pipe.provider.generate = title_reply
+
+    titles = pipe._generate_titles(
+        "<h2>AI Agent 落地观察</h2><p>企业正在推进 Agent 应用。</p>",
+        fallback_title="AI Agent 产品趋势与企业落地挑战",
+    )
+
+    assert titles[0] == "企业AI Agent，别急着上生产"

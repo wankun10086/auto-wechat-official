@@ -1,4 +1,5 @@
 import re
+from bs4 import BeautifulSoup
 from loguru import logger
 from src.config import Config, load_prompt
 from src.ai.provider import BaseProvider
@@ -20,15 +21,15 @@ class Humanizer:
 
             prompt_colloquial = self.prompts["colloquial_rewrite"].format(article=article)
             result = self.provider.generate(prompt_colloquial, temperature=0.85)
-            article = self._extract_html(result.text)
+            article = self._accept_candidate(article, self._extract_html(result.text), "口语化改写")
 
             prompt_emotion = self.prompts["emotion_inject"].format(article=article)
             result = self.provider.generate(prompt_emotion, temperature=0.85)
-            article = self._extract_html(result.text)
+            article = self._accept_candidate(article, self._extract_html(result.text), "情绪注入")
 
         prompt_de_template = self.prompts["de_template"].format(article=article)
         result = self.provider.generate(prompt_de_template, temperature=0.85)
-        article = self._extract_html(result.text)
+        article = self._accept_candidate(article, self._extract_html(result.text), "去模板化")
 
         article = self._clean_banned_words(article)
         ai_score = self._calculate_ai_score(article)
@@ -44,6 +45,57 @@ class Humanizer:
             text = text.split("```", 1)[1]
             text = text.split("```", 1)[0]
         return text.strip()
+
+    def _accept_candidate(self, previous: str, candidate: str, step: str) -> str:
+        if self._candidate_is_safe(previous, candidate):
+            return candidate
+        logger.warning(f"{step}结果疑似丢失正文，已保留上一版内容")
+        return previous
+
+    def _candidate_is_safe(self, previous: str, candidate: str) -> bool:
+        if not candidate.strip():
+            return False
+
+        previous_text = self._plain_text(previous)
+        candidate_text = self._plain_text(candidate)
+        if len(previous_text) >= 600 and len(candidate_text) < len(previous_text) * 0.55:
+            return False
+        if len(previous_text) >= 200 and len(candidate_text) < 120:
+            return False
+
+        previous_headings = self._heading_count(previous)
+        candidate_headings = self._heading_count(candidate)
+        if previous_headings >= 2 and candidate_headings < max(1, previous_headings // 2):
+            return False
+
+        candidate_text_lower = candidate_text.lower()
+        meta_hits = sum(1 for phrase in self._meta_phrases() if phrase in candidate_text_lower)
+        if meta_hits >= 2:
+            return False
+        return True
+
+    def _plain_text(self, html: str) -> str:
+        return BeautifulSoup(html or "", "html.parser").get_text(" ", strip=True)
+
+    def _heading_count(self, html: str) -> int:
+        soup = BeautifulSoup(html or "", "html.parser")
+        return len(soup.find_all(["h2", "h3"]))
+
+    def _meta_phrases(self):
+        return (
+            "请提供",
+            "提供完整",
+            "主要内容摘要",
+            "我可以帮",
+            "我可以为",
+            "无法改写",
+            "没有提供",
+            "原文都没",
+            "修改要求",
+            "改写要求",
+            "保持html标签",
+            "html标签",
+        )
 
     def _clean_banned_words(self, text):
         for word in self.banned_words:

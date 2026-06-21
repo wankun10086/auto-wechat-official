@@ -116,7 +116,7 @@ class ArticleGenerationPipeline:
             final_content = self.template.wrap_article(final_content)
 
             stage = "标题/摘要生成"
-            titles = self._generate_titles(final_content)
+            titles = self._generate_titles(final_content, fallback_title=content_result.title)
             title = titles[0] if titles else content_result.title
             digest = self._generate_digest(final_content)
 
@@ -321,19 +321,45 @@ class ArticleGenerationPipeline:
         result = self.provider.generate(prompt, temperature=0.85, max_tokens=6000)
         return self._extract_html(result.text)
 
-    def _generate_titles(self, article: str) -> list:
+    def _generate_titles(self, article: str, fallback_title: str = "") -> list:
         prompt_template = self.prompts.get("title_generation", "")
-        prompt = prompt_template.format(summary=article[:1500])
+        summary = BeautifulSoup(article or "", "html.parser").get_text(" ", strip=True)[:1500]
+        prompt = prompt_template.format(summary=summary)
         result = self.provider.generate(prompt, temperature=0.9, max_tokens=500)
 
         titles = []
         for line in result.text.strip().split("\n"):
             line = line.strip()
             if line and (line[0].isdigit() or line.startswith("-") or line.startswith("*")):
-                title = line.lstrip("0123456789.-*) ").strip()
-                if title:
+                title = self._clean_title_candidate(line)
+                if self._title_candidate_is_safe(title):
                     titles.append(title)
-        return titles[:5]
+        if titles:
+            return titles[:5]
+        return [fallback_title] if fallback_title else []
+
+    def _clean_title_candidate(self, line: str) -> str:
+        title = line.lstrip("0123456789.-*) ").strip()
+        return title.strip(" 「」『』“”\"'`*_")
+
+    def _title_candidate_is_safe(self, title: str) -> bool:
+        if not title:
+            return False
+        plain = re.sub(r"\s+", "", title)
+        if len(plain) < 6 or len(plain) > 80:
+            return False
+        banned_fragments = (
+            "请提供",
+            "提供完整",
+            "主要内容摘要",
+            "我可以",
+            "无法",
+            "不能",
+            "标题候选",
+            "生成标题",
+            "麻烦",
+        )
+        return not any(fragment in title for fragment in banned_fragments)
 
     def _generate_digest(self, article: str) -> str:
         prompt_template = self.prompts.get("digest_generation", "")
