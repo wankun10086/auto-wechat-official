@@ -164,6 +164,67 @@ def test_generate_publish_uses_readiness_gate(monkeypatch):
     assert "微信配置缺失" in status["message"]
 
 
+def test_generate_task_reports_pipeline_last_error(monkeypatch):
+    from web import api as webapi
+
+    class FakePipeline:
+        def __init__(self, model=None):
+            self.last_error = ""
+
+        async def run(self, **kwargs):
+            self.last_error = "模型调用失败: quota exceeded"
+            return None
+
+    monkeypatch.setattr(webapi, "ArticleGenerationPipeline", FakePipeline)
+
+    r = client.post("/api/generate", json={
+        "source_type": "topic",
+        "topic": "AI Agent 产品趋势",
+        "style": "tech_explanation",
+        "publish": False,
+    })
+    assert r.status_code == 200
+    task_id = r.json()["task_id"]
+
+    status = client.get(f"/api/tasks/{task_id}").json()
+    assert status["status"] == "failed"
+    assert "quota exceeded" in status["message"]
+
+
+def test_generate_task_reports_pipeline_warnings(monkeypatch):
+    from web import api as webapi
+
+    class FakePipeline:
+        def __init__(self, model=None):
+            self.last_error = ""
+
+        async def run(self, **kwargs):
+            return {
+                "id": 99,
+                "title": "demo",
+                "content": "<p>demo</p>",
+                "digest": "demo",
+                "ai_score": 0.2,
+                "warnings": ["AI配图生成失败: image quota exhausted"],
+            }
+
+    monkeypatch.setattr(webapi, "ArticleGenerationPipeline", FakePipeline)
+
+    r = client.post("/api/generate", json={
+        "source_type": "topic",
+        "topic": "AI Agent 产品趋势",
+        "style": "tech_explanation",
+        "publish": False,
+    })
+    assert r.status_code == 200
+    task_id = r.json()["task_id"]
+
+    status = client.get(f"/api/tasks/{task_id}").json()
+    assert status["status"] == "done"
+    assert "文章生成完成" in status["message"]
+    assert "image quota exhausted" in status["message"]
+
+
 def test_article_detail_sanitizes_preview_html():
     from src.db.models import get_session, Article
 

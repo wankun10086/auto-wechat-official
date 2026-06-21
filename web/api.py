@@ -150,7 +150,11 @@ async def _run_generation_task_inner(task_id: str, req: GenerateRequest):
             generate_images=not req.no_images,
         )
         if not result:
-            tasks[task_id] = {"status": "failed", "progress": 0, "message": "文章生成失败"}
+            tasks[task_id] = {
+                "status": "failed",
+                "progress": 0,
+                "message": f"文章生成失败: {_pipeline_error(pipeline)}",
+            }
             return
 
         tasks[task_id] = {
@@ -165,19 +169,22 @@ async def _run_generation_task_inner(task_id: str, req: GenerateRequest):
             if publish_result:
                 tasks[task_id] = {
                     "status": "done", "progress": 100,
-                    "message": _format_publish_success_message(publish_result),
+                    "message": _with_result_warnings(_format_publish_success_message(publish_result), result),
                     "article_id": result["id"],
                 }
             else:
                 tasks[task_id] = {
                     "status": "done", "progress": 100,
-                    "message": f"文章已生成，但推送草稿失败: {_publish_message(publish_result, '推送失败')}",
+                    "message": _with_result_warnings(
+                        f"文章已生成，但推送草稿失败: {_publish_message(publish_result, '推送失败')}",
+                        result,
+                    ),
                     "article_id": result["id"],
                 }
         else:
             tasks[task_id] = {
                 "status": "done", "progress": 100,
-                "message": "文章生成完成",
+                "message": _with_result_warnings("文章生成完成", result),
                 "article_id": result["id"],
             }
     except Exception as e:
@@ -500,6 +507,17 @@ def _format_publish_success_message(result) -> str:
     message = _publish_message(result, "已推送到微信草稿箱")
     media_id = _publish_media_id(result)
     return f"{message}: {media_id}" if media_id else message
+
+
+def _pipeline_error(pipeline) -> str:
+    return getattr(pipeline, "last_error", "") or "未知错误"
+
+
+def _with_result_warnings(message: str, result: dict) -> str:
+    warnings = result.get("warnings", []) or []
+    if not warnings:
+        return message
+    return f"{message}；注意：{'；'.join(warnings[:3])}"
 
 
 def _preview_article_content(content: str) -> str:

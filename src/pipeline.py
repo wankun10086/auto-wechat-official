@@ -41,6 +41,8 @@ class ArticleGenerationPipeline:
         self.api_client = WeChatAPIClient(wechat_cfg.get("app_id", ""), wechat_cfg.get("app_secret", ""))
         self.author = wechat_cfg.get("author", "")
         self.db_path = self.config.get("database", "path", default="data/articles.db")
+        self.last_error = ""
+        self.warnings = []
 
     async def run(
         self,
@@ -51,25 +53,36 @@ class ArticleGenerationPipeline:
         screenshot_targets: list = None,
         generate_images: bool = True,
     ) -> dict:
-        session = get_session(self.db_path)
+        session = None
         article_record = None
         source_type = (source_type or "url").lower()
+        self.last_error = ""
+        self.warnings = []
+        stage = "初始化"
 
         try:
+            stage = "数据库初始化"
+            session = get_session(self.db_path)
+
+            stage = "内容抓取"
             content_result = await self._fetch_content(source, source_type)
             if not content_result:
-                logger.error("内容抓取失败")
+                self.last_error = "内容抓取失败：未获得可用素材"
+                logger.error(self.last_error)
                 return None
 
             logger.info(f"内容抓取成功: {content_result.title} ({len(content_result.text_content)} 字)")
 
             screenshots = []
             if screenshot_targets and source_type == "url":
+                stage = "截图"
                 screenshots = await self._take_screenshots(source, screenshot_targets)
                 logger.info(f"截图完成: {len(screenshots)} 张")
 
+            stage = "文章生成"
             raw_content = self._generate_article(content_result, style, extra_prompt)
 
+            stage = "去AI味处理"
             humanizer = Humanizer(self.provider)
             final_content, ai_score = humanizer.full_pipeline(raw_content)
 
@@ -79,20 +92,25 @@ class ArticleGenerationPipeline:
             material_images = []
             ai_images = []
             if generate_images:
+                stage = "素材配图处理"
                 material_images = self._material_images(content_result)
                 if material_images:
                     final_content = self._embed_images(final_content, material_images)
 
+                stage = "AI配图生成"
                 ai_images = await self._generate_ai_images(content_result, final_content)
                 if ai_images:
                     final_content = self._embed_images(final_content, ai_images)
 
+            stage = "模板包装"
             final_content = self.template.wrap_article(final_content)
 
+            stage = "标题/摘要生成"
             titles = self._generate_titles(final_content)
             title = titles[0] if titles else content_result.title
             digest = self._generate_digest(final_content)
 
+            stage = "数据库保存"
             article_record = Article(
                 title=title,
                 raw_content=raw_content,
@@ -118,16 +136,19 @@ class ArticleGenerationPipeline:
                 "material_images": material_images,
                 "ai_images": ai_images,
                 "source_type": source_type,
+                "warnings": list(self.warnings),
             }
 
         except Exception as e:
-            logger.error(f"流程失败: {e}")
-            if article_record:
+            self.last_error = f"{stage}失败: {e}"
+            logger.error(self.last_error)
+            if article_record and session:
                 article_record.status = "failed"
                 session.commit()
             return None
         finally:
-            session.close()
+            if session:
+                session.close()
 
     async def publish(self, result: dict) -> PublishResult:
         session = get_session(self.db_path)
@@ -187,6 +208,7 @@ class ArticleGenerationPipeline:
             await capture.start()
             return await capture.capture_url(url, targets)
         except Exception as e:
+            self._add_warning(f"截图失败: {e}")
             logger.error(f"截图失败: {e}")
             return []
         finally:
@@ -263,12 +285,19 @@ class ArticleGenerationPipeline:
             )
             image_path = self.provider.generate_image(image_prompt)
             return [{"path": image_path, "description": "AI生成配图", "type": "ai_generated"}]
-        except NotImplementedError:
-            logger.info("当前模型不支持图片生成，跳过AI配图")
+        except NotImplementedError as e:
+            message = f"当前模型不支持图片生成，已跳过AI配图: {e}"
+            self._add_warning(message)
+            logger.info(message)
             return []
         except Exception as e:
+            self._add_warning(f"AI配图生成失败: {e}")
             logger.warning(f"AI配图生成失败: {e}")
             return []
+
+    def _add_warning(self, message: str) -> None:
+        if message and message not in self.warnings:
+            self.warnings.append(message)
 
     def _embed_images(self, article_html: str, images: list) -> str:
         for img in images:

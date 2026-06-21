@@ -51,6 +51,24 @@ def test_topic_pipeline_runs_offline_with_mocked_research(local_tmp, monkeypatch
     assert "AI Agent 产品趋势" in result["content"] or result["title"]
 
 
+def test_pipeline_run_exposes_last_error(monkeypatch):
+    async def fail_fetch(self, source, source_type):
+        raise RuntimeError("fetch exploded")
+
+    monkeypatch.setattr(ArticleGenerationPipeline, "_fetch_content", fail_fetch)
+
+    pipe = ArticleGenerationPipeline(model="mock")
+    result = asyncio.run(pipe.run(
+        source="https://example.com/fail",
+        source_type="url",
+        generate_images=False,
+    ))
+
+    assert result is None
+    assert "内容抓取失败" in pipe.last_error
+    assert "fetch exploded" in pipe.last_error
+
+
 def test_publish_rewrites_local_images_and_uses_generated_thumb(local_tmp, monkeypatch):
     image_path = local_tmp / "cover.jpg"
     image_path.write_bytes(b"fake-image")

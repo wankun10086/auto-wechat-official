@@ -57,8 +57,10 @@ class ArticlePipeline:
                 generate_images=True,
             )
             if not result:
-                logger.warning("流水线未产出文章")
+                logger.warning(f"流水线未产出文章: {getattr(pipeline, 'last_error', '') or '未知错误'}")
                 return None
+            for warning in result.get("warnings", []) or []:
+                logger.warning(f"流水线警告: {warning}")
 
             publish_result = await pipeline.publish(result)
             self._log_action(

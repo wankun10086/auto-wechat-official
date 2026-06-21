@@ -106,7 +106,7 @@ async def cmd_from_url(args):
     )
 
     if not result:
-        print("文章生成失败")
+        print(f"文章生成失败: {_pipeline_error(pipeline)}")
         return
 
     print(f"\n文章生成成功！")
@@ -114,6 +114,7 @@ async def cmd_from_url(args):
     print(f"  AI味得分: {result['ai_score']:.2f}")
     print(f"  截图数量: {len(result.get('screenshots', []))}")
     print(f"  AI配图: {len(result.get('ai_images', []))}")
+    _print_warnings(result)
 
     if args.output:
         Path(args.output).write_text(result["content"], encoding="utf-8")
@@ -148,12 +149,13 @@ async def cmd_from_file(args):
     )
 
     if not result:
-        print("文章生成失败")
+        print(f"文章生成失败: {_pipeline_error(pipeline)}")
         return
 
     print(f"\n文章生成成功！")
     print(f"  标题: {result['title']}")
     print(f"  AI味得分: {result['ai_score']:.2f}")
+    _print_warnings(result)
 
     if args.output:
         Path(args.output).write_text(result["content"], encoding="utf-8")
@@ -184,7 +186,7 @@ async def cmd_from_topic(args):
     )
 
     if not result:
-        print("文章生成失败")
+        print(f"文章生成失败: {_pipeline_error(pipeline)}")
         return
 
     print("\n文章生成成功：")
@@ -192,6 +194,7 @@ async def cmd_from_topic(args):
     print(f"  AI味得分: {result['ai_score']:.2f}")
     print(f"  素材配图: {len(result.get('material_images', []))}")
     print(f"  AI配图: {len(result.get('ai_images', []))}")
+    _print_warnings(result)
 
     if args.output:
         Path(args.output).write_text(result["content"], encoding="utf-8")
@@ -302,6 +305,15 @@ def _format_publish_success(result) -> str:
     message = getattr(result, "message", "") or "草稿创建成功"
     media_id = getattr(result, "media_id", "") or ""
     return f"{message}: {media_id}" if media_id else message
+
+
+def _pipeline_error(pipeline) -> str:
+    return getattr(pipeline, "last_error", "") or "未知错误"
+
+
+def _print_warnings(result: dict) -> None:
+    for warning in result.get("warnings", []) or []:
+        print(f"  注意: {warning}")
 
 
 def main():

@@ -34,3 +34,26 @@ def test_pipeline_failure_returns_none_on_missing_file():
         generate_images=False,
     ))
     assert result is None
+    assert "内容抓取失败" in pipe.last_error
+    assert "does-not-exist.md" in pipe.last_error
+
+
+def test_pipeline_collects_nonfatal_image_warnings(local_tmp):
+    src = local_tmp / "demo.md"
+    src.write_text("# 标题\n\n正文内容", encoding="utf-8")
+
+    pipe = ArticleGenerationPipeline(model="mock")
+
+    def fail_image(prompt, **kwargs):
+        raise RuntimeError("image quota exhausted")
+
+    pipe.provider.generate_image = fail_image
+    result = asyncio.run(pipe.run(
+        source=str(src),
+        source_type="file",
+        generate_images=True,
+    ))
+
+    assert result is not None
+    assert result["ai_images"] == []
+    assert any("image quota exhausted" in warning for warning in result["warnings"])
