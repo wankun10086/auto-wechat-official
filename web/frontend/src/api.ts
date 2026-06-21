@@ -10,6 +10,7 @@ export interface GenerateParams {
   prompt: string
   screenshot: string
   no_images: boolean
+  require_ai_image?: boolean
   publish: boolean
 }
 

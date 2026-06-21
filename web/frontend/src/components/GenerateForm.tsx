@@ -39,6 +39,7 @@ export default function GenerateForm({ models, onGenerated, onError }: Props) {
   const [prompt, setPrompt] = useState('')
   const [screenshot, setScreenshot] = useState('')
   const [noImages, setNoImages] = useState(false)
+  const [requireAiImage, setRequireAiImage] = useState(false)
   const [loading, setLoading] = useState(false)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -90,6 +91,7 @@ export default function GenerateForm({ models, onGenerated, onError }: Props) {
         prompt: prompt.trim(),
         screenshot: sourceType === 'url' ? screenshot : '',
         no_images: noImages,
+        require_ai_image: requireAiImage,
         publish: shouldPublish,
       }
       const result = await generate(params)
@@ -286,8 +288,24 @@ export default function GenerateForm({ models, onGenerated, onError }: Props) {
 
       <div className="form-group">
         <label className="checkbox-label">
-          <input type="checkbox" checked={noImages} onChange={e => setNoImages(e.target.checked)} />
+          <input
+            type="checkbox"
+            checked={noImages}
+            onChange={e => {
+              setNoImages(e.target.checked)
+              if (e.target.checked) setRequireAiImage(false)
+            }}
+          />
           不包含图片
+        </label>
+        <label className={`checkbox-label ${noImages ? 'disabled' : ''}`}>
+          <input
+            type="checkbox"
+            checked={requireAiImage}
+            disabled={noImages}
+            onChange={e => setRequireAiImage(e.target.checked)}
+          />
+          草稿必须包含AI配图
         </label>
         {!noImages && selectedModelInfo && !selectedModelInfo.supports_image && !selectedImageModel && (
           <div className="field-hint">当前文本模型不会生成图片；系统会尝试调用可用的独立AI配图模型。</div>

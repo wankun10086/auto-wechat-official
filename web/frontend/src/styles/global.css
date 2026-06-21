@@ -310,9 +310,16 @@ body {
 
 .checkbox-label:hover { background: var(--surface-2); }
 
+.checkbox-label.disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .checkbox-label input[type="checkbox"] {
   width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; margin: 0;
 }
+
+.checkbox-label input[type="checkbox"]:disabled { cursor: not-allowed; }
 
 .checkbox-label:has(input:checked) {
   background: var(--accent-soft); border-color: var(--accent); color: var(--accent);

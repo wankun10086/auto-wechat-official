@@ -226,6 +226,75 @@ def test_generate_task_reports_pipeline_warnings(monkeypatch):
     assert "image quota exhausted" in status["message"]
 
 
+def test_generate_publish_requires_ai_image_before_wechat(monkeypatch):
+    from web import api as webapi
+
+    calls = {"publish": 0}
+
+    class FakePipeline:
+        def __init__(self, model=None, image_model=None):
+            self.last_error = ""
+
+        async def run(self, **kwargs):
+            return {
+                "id": 101,
+                "title": "demo",
+                "content": "<p>demo</p>",
+                "digest": "demo",
+                "ai_score": 0.1,
+                "ai_images": [],
+                "warnings": ["AI配图生成失败: invalid api key"],
+            }
+
+        async def publish(self, result):
+            calls["publish"] += 1
+            raise AssertionError("strict AI image gate should stop before creating draft")
+
+    monkeypatch.setattr(webapi, "ArticleGenerationPipeline", FakePipeline)
+
+    r = client.post("/api/generate", json={
+        "source_type": "topic",
+        "topic": "AI Agent 产品趋势",
+        "style": "tech_explanation",
+        "publish": True,
+        "require_ai_image": True,
+    })
+    assert r.status_code == 200
+    task_id = r.json()["task_id"]
+
+    status = client.get(f"/api/tasks/{task_id}").json()
+    assert status["status"] == "failed"
+    assert status["article_id"] == 101
+    assert "AI配图未生成" in status["message"]
+    assert "invalid api key" in status["message"]
+    assert calls["publish"] == 0
+
+
+def test_generate_rejects_require_ai_image_with_no_images(monkeypatch):
+    from web import api as webapi
+
+    class FakePipeline:
+        def __init__(self, model=None, image_model=None):
+            raise AssertionError("conflicting image options should fail before pipeline construction")
+
+    monkeypatch.setattr(webapi, "ArticleGenerationPipeline", FakePipeline)
+
+    r = client.post("/api/generate", json={
+        "source_type": "topic",
+        "topic": "AI Agent 产品趋势",
+        "style": "tech_explanation",
+        "publish": True,
+        "no_images": True,
+        "require_ai_image": True,
+    })
+    assert r.status_code == 200
+    task_id = r.json()["task_id"]
+
+    status = client.get(f"/api/tasks/{task_id}").json()
+    assert status["status"] == "failed"
+    assert "不能选择不包含图片" in status["message"]
+
+
 def test_generate_task_passes_image_model(monkeypatch):
     from web import api as webapi
 

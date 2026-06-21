@@ -13,6 +13,7 @@ class GenerateRequest(BaseModel):
     prompt: str = ""
     screenshot: str = ""
     no_images: bool = False
+    require_ai_image: bool = False
     publish: bool = False
 
 

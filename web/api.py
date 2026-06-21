@@ -128,6 +128,14 @@ def _run_pipeline_sync(task_id: str, req: GenerateRequest):
 async def _run_generation_task_inner(task_id: str, req: GenerateRequest):
     tasks[task_id] = {"status": "running", "progress": 10, "message": "正在抓取内容..."}
     try:
+        if req.require_ai_image and req.no_images:
+            tasks[task_id] = {
+                "status": "failed",
+                "progress": 0,
+                "message": "AI配图必需时不能选择不包含图片",
+            }
+            return
+
         if req.publish:
             checks = collect_readiness(
                 model=req.model,
@@ -170,6 +178,17 @@ async def _run_generation_task_inner(task_id: str, req: GenerateRequest):
         }
 
         if req.publish:
+            if req.require_ai_image and not result.get("ai_images"):
+                tasks[task_id] = {
+                    "status": "failed", "progress": 80,
+                    "message": _with_result_warnings(
+                        "文章已生成，但AI配图未生成，已停止创建微信草稿；请先运行 live 检查或修复图片模型配置",
+                        result,
+                    ),
+                    "article_id": result["id"],
+                }
+                return
+
             tasks[task_id]["message"] = "正在推送到微信草稿..."
             publish_result = await pipeline.publish(result)
             if publish_result:
